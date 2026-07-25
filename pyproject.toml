@@ -10,7 +10,7 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "[Your Name]", email = "[your.email@example.com]"},
+    {name = "Alastair(Dongxu-Jiang)", email = "2684331892@qq.com"},
 ]
 keywords = [
     "quantitative-trading",
@@ -50,9 +50,9 @@ mps = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/daft"
-Repository = "https://github.com/YOUR_USERNAME/daft.git"
-Issues = "https://github.com/YOUR_USERNAME/daft/issues"
+Homepage = "https://github.com/Dongxu-Jiang/daft"
+Repository = "https://github.com/Dongxu-Jiang/daft.git"
+Issues = "https://github.com/Dongxu-Jiang/daft/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

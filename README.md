@@ -322,7 +322,7 @@ Three cached vectors for the hardened $(regime, expert\_pattern)$ combination.
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/daft.git
+git clone https://github.com/Dongxu-Jiang/daft.git
 cd daft
 
 # Install (CPU)
@@ -586,12 +586,12 @@ If you use DAFT in your research, please cite:
 
 ```bibtex
 @software{daft2026,
-  author       = {[Your Name]},
+  author       = {Alastair(Dongxu-Jiang)},
   title        = {DAFT: Dimension-Aware Financial Trading},
   year         = {2026},
   publisher    = {GitHub},
   journal      = {GitHub Repository},
-  url          = {https://github.com/[YOUR_USERNAME]/daft},
+  url          = {https://github.com/[Dongxu-Jiang]/daft},
   note         = {A cross-dimensional attention architecture for medium-frequency
                   quantitative trading, inspired by Kimi K3},
 }

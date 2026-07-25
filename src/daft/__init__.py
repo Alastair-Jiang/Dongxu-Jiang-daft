@@ -6,7 +6,7 @@ trading, inspired by Kimi K3's Stable LatentMoE, KDA, and AttnRes.
 """
 
 __version__ = "0.1.0"
-__author__ = "[Your Name]"
+__author__ = "Alastair(Dongxu-Jiang)"
 __license__ = "MIT"
 
 from daft.models.router import RegimeRouter
