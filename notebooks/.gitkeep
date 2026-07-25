@@ -1,0 +1,6 @@
+# Analysis Notebooks
+#
+# 01_data_exploration.ipynb   — Data loading, summary statistics, regime visualization
+# 02_regime_analysis.ipynb    — Router regime assignments, latent space visualization
+# 03_ablation_results.ipynb   — Component ablation metrics, significance tests
+# 04_hardening_analysis.ipynb — Hardening cache size vs threshold, speedup analysis

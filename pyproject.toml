@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daft"
+version = "0.1.0"
+description = "Dimension-Aware Financial Trading: cross-dimensional attention architecture for medium-frequency quantitative trading"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "[Your Name]", email = "[your.email@example.com]"},
+]
+keywords = [
+    "quantitative-trading",
+    "mixture-of-experts",
+    "time-series",
+    "financial-machine-learning",
+    "attention-mechanism",
+    "medium-frequency-trading",
+    "regime-detection",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+gpu = [
+    "torch>=2.0,!=2.0.1",     # CUDA-enabled
+]
+mps = [
+    "torch>=2.0",              # MPS-enabled (Apple Silicon)
+]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/daft"
+Repository = "https://github.com/YOUR_USERNAME/daft.git"
+Issues = "https://github.com/YOUR_USERNAME/daft/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short"

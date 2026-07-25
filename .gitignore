@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+
+# Data (placeholder — actual data not committed)
+data/
+*.parquet
+*.csv
+*.h5
+*.pkl
+!data/.gitkeep
+
+# Models (placeholder — trained weights not committed by default)
+checkpoints/
+*.pt
+*.pth
+!checkpoints/.gitkeep
+
+# Experiment outputs
+runs/
+logs/
+outputs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Mypy
+.mypy_cache/
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+htmlcov/
+.coverage
+coverage.xml

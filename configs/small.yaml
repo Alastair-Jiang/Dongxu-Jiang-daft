@@ -1,0 +1,108 @@
+# DAFT Smoke Test Configuration
+# Synthetic data, minimal resources — runs in ~30 seconds on CPU/MPS
+# Usage: make paper CONFIG=configs/small.yaml
+
+experiment:
+  name: "daft-smoke-test"
+  seed: 42
+  device: "auto"                # "cpu", "cuda", "mps", or "auto"
+
+data:
+  source: "synthetic"           # "synthetic", "baostock", "yfinance", "custom"
+  n_stocks: 200
+  n_days: 500
+  frequency: "1min"             # "1min", "5min", "15min", "30min", "1h", "1d"
+  features:
+    market_state_dim: 200       # Dimensionality of s_t (raw market state vector)
+    regime_latent_dim: 16       # Dimensionality of z_t (regime latent space)
+    use_freq_features: true     # Enable FFT spectral features
+    use_regime_features: true   # Enable regime-specific features
+
+model:
+  # Expert pool
+  n_experts: 8
+  top_k: 3
+  experts:
+    trend:
+      hidden_dim: 64
+      n_layers: 2
+    reversal:
+      hidden_dim: 64
+      n_layers: 2
+    volatility:
+      hidden_dim: 48
+      n_layers: 2
+    event:
+      hidden_dim: 48
+      n_layers: 2
+
+  # Router (Stable LatentMoE)
+  router:
+    input_dim: 200
+    latent_dim: 16
+    temperature_train: 1.0
+    temperature_inference: 0.1
+    noisy_gating_std: 0.1
+
+  # Memory (KDA)
+  memory:
+    d_k: 128                    # Key dimension (= memory slots)
+    d_v: 64                     # Value dimension
+    bottleneck_ratio: 4         # Forget gate low-rank compression
+    use_route_modulation: true  # Enable Router → Memory CDAP connection
+
+  # Cross-Dimension Attention Protocol
+  cross_dim_attn:
+    joint_dim: 64               # Joint latent space dimension
+    modulation_strength: 0.1    # δ: back-projection scale (low during Stage 2)
+    use_expert_modulation: true
+    use_memory_modulation: true
+    use_depth_modulation: true
+
+  # Adaptive Hardening
+  hardening:
+    threshold: 100              # θ: min observations before hardening
+    min_confidence: 0.95        # ρ: min confidence ratio
+    entropy_multiplier: 2.0     # λ: regime shift detection sensitivity
+    n_regimes_tracked: 8
+
+training:
+  stage1:                       # Independent expert training
+    epochs: 50
+    batch_size: 2048
+    lr: 0.001
+    lr_scheduler: "cosine"
+    weight_decay: 1.0e-5
+    early_stop_patience: 10
+
+  stage2:                       # Router + Memory training (experts frozen)
+    epochs: 100
+    batch_size: 2048
+    lr: 0.0005
+    modulation_strength: 0.1    # Low CDAP strength during Stage 2
+
+  stage3:                       # Joint fine-tuning
+    epochs: 50
+    batch_size: 2048
+    lr: 0.00001
+    modulation_strength: 1.0    # Full CDAP strength
+    early_stop_patience: 15
+
+evaluation:
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  metrics:
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "ic_rank"
+    - "icir"
+    - "rmse"
+    - "inference_latency_ms"
+    - "memory_mb"
+
+logging:
+  level: "INFO"
+  wandb: false                   # Set to true and configure WANDB_API_KEY
+  checkpoint_dir: "./checkpoints"
+  log_dir: "./logs"

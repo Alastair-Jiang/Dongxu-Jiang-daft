@@ -1,0 +1,50 @@
+# DAFT Hardening Ablation Configuration
+# Isolates the effect of the Adaptive Hardening Mechanism
+# Usage: make paper CONFIG=configs/hardening.yaml
+
+experiment:
+  name: "daft-hardening-ablation"
+  seed: 42
+  device: "auto"
+
+data:
+  source: "baostock"
+  n_stocks: 300
+  n_years: 5
+  frequency: ["5min", "30min", "1h"]
+
+model:  # Inherits from paper.yaml, overrides:
+  hardening:
+    threshold: [50, 100, 200, 500]   # Sweep: hardening sensitivity
+    min_confidence: [0.90, 0.95, 0.99]
+    entropy_multiplier: [1.5, 2.0, 3.0]
+
+ablation:
+  # Compare hardening ON vs OFF
+  modes:
+    - name: "full_path"
+      hardening_enabled: false
+    - name: "hardened_path"
+      hardening_enabled: true
+
+  # Metrics to track across hardening levels
+  tracking:
+    - "hardened_ratio"            # % of time steps eligible for fast path
+    - "regime_degradation_rate"   # % of fast-path steps that fell back
+    - "speedup_ratio"             # full_path_latency / hardened_path_latency
+    - "accuracy_delta"            # full_path_metric - hardened_path_metric
+    - "cache_hit_rate"            # % of fast-path lookups that hit cache
+    - "entropy_crossings"         # Number of regime shift detections
+
+evaluation:
+  train_split: 0.6
+  val_split: 0.2
+  test_split: 0.2
+  metrics:
+    - "hardened_ratio"
+    - "regime_degradation_rate"
+    - "speedup_ratio"
+    - "accuracy_delta"
+    - "cache_hit_rate"
+    - "sharpe_ratio"
+    - "inference_latency_ms"

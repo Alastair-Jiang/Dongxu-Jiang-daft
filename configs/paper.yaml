@@ -1,0 +1,118 @@
+# DAFT Full Experiment Configuration
+# Real data, full-scale training — for reproduction of paper results
+# Usage: make paper CONFIG=configs/paper.yaml
+
+experiment:
+  name: "daft-full"
+  seed: 42
+  device: "auto"
+  mixed_precision: true         # bfloat16 where supported
+
+data:
+  source: "baostock"            # Chinese A-share market data
+  n_stocks: 500                 # CSI 500 constituent stocks
+  n_years: 5                    # 2021–2026
+  frequency: ["1min", "5min", "15min", "30min", "1h", "1d"]
+  features:
+    market_state_dim: 200
+    regime_latent_dim: 16
+    use_freq_features: true
+    use_regime_features: true
+  preprocessing:
+    winsorize: true             # Clip extreme values at 1st/99th percentile
+    handle_suspension: true     # Mask suspended periods
+    handle_limit_up_down: true  # Mask limit-up/down periods (bias correction)
+    forward_fill_limit: 5       # Max consecutive forward-fill bars
+    min_trading_days_per_year: 200
+
+model:
+  n_experts: 8
+  top_k: 3
+  experts:
+    trend:
+      hidden_dim: 128
+      n_layers: 3
+    reversal:
+      hidden_dim: 128
+      n_layers: 3
+    volatility:
+      hidden_dim: 96
+      n_layers: 2
+    event:
+      hidden_dim: 96
+      n_layers: 2
+
+  router:
+    input_dim: 200
+    latent_dim: 16
+    temperature_train: 1.0
+    temperature_inference: 0.1
+    noisy_gating_std: 0.1
+
+  memory:
+    d_k: 128
+    d_v: 64
+    bottleneck_ratio: 4
+    use_route_modulation: true
+
+  cross_dim_attn:
+    joint_dim: 64
+    modulation_strength: 1.0
+    use_expert_modulation: true
+    use_memory_modulation: true
+    use_depth_modulation: true
+
+  hardening:
+    threshold: 200
+    min_confidence: 0.95
+    entropy_multiplier: 2.0
+    n_regimes_tracked: 8
+
+training:
+  stage1:
+    epochs: 200
+    batch_size: 4096
+    lr: 0.001
+    lr_scheduler: "cosine_warm_restarts"
+    weight_decay: 1.0e-5
+    early_stop_patience: 20
+    gradient_clip: 1.0
+
+  stage2:
+    epochs: 300
+    batch_size: 4096
+    lr: 0.0005
+    modulation_strength: 0.1
+    gradient_clip: 1.0
+
+  stage3:
+    epochs: 100
+    batch_size: 4096
+    lr: 0.00001
+    modulation_strength: 1.0
+    early_stop_patience: 25
+    gradient_clip: 0.5
+
+evaluation:
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+  walk_forward: true            # Expanding window cross-validation
+  n_splits: 5
+  metrics:
+    - "sharpe_ratio"
+    - "max_drawdown"
+    - "calmar_ratio"
+    - "ic_rank"
+    - "icir"
+    - "hit_rate"
+    - "rmse"
+    - "inference_latency_ms"
+    - "memory_mb"
+
+logging:
+  level: "INFO"
+  wandb: true
+  checkpoint_dir: "./checkpoints"
+  log_dir: "./logs"
+  save_top_k: 3
