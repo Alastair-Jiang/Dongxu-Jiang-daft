@@ -92,6 +92,12 @@ class KDAMarketMemory(nn.Module):
         # State matrix (created dynamically per batch)
         self.M: Optional[torch.Tensor] = None
 
+        # === CDAP: external gate modulation (set by ensemble after CDAP forward) ===
+        # memory_gate ∈ (0,1)^{d_k} from CDAP's joint→memory reverse projection.
+        # Applied at the NEXT timestep's forget-gate computation to close the
+        # Depth→Memory feedback loop in the CDAP triad.
+        self._external_gate: Optional[torch.Tensor] = None  # (B, d_k)
+
     def reset_state(self, batch_size: int, device: torch.device):
         """(Re)initialize the memory matrix to zeros.
 
@@ -102,11 +108,14 @@ class KDAMarketMemory(nn.Module):
         device : torch.device
         """
         self.M = torch.zeros(batch_size, self.d_k, self.d_v, device=device)
+        self._external_gate = None  # Stale gate instructions invalid with new state
 
     def detach_state(self):
         """Detach memory state from computation graph (call after backward)."""
         if self.M is not None:
             self.M = self.M.detach()
+        if self._external_gate is not None:
+            self._external_gate = self._external_gate.detach()
 
     def forward(
         self,
@@ -151,6 +160,11 @@ class KDAMarketMemory(nn.Module):
             route_mod = torch.sigmoid(self.route_modulate(z_t))  # (B, d_k)
             alpha = alpha * route_mod  # Element-wise modulation
 
+        # === CDAP: Depth → Memory modulation (external gate from CDAP) ===
+        if self._external_gate is not None:
+            alpha = alpha * self._external_gate
+            self._external_gate = None  # Consume: single-use, applied once
+
         # === Step 2: Compute β_t (learnable learning rate) ===
         beta = self.beta_proj(s_t)  # (B, 1), β ∈ (0, 1)
 
@@ -190,6 +204,21 @@ class KDAMarketMemory(nn.Module):
         retrieved = self._rms_norm(retrieved)
 
         return retrieved, self.M.clone()
+
+    def set_external_gate(self, gate: Optional[torch.Tensor]) -> None:
+        """Set an external forget-gate modulation from CDAP.
+
+        Called by ExpertEnsemble after CDAP forward to close the
+        Depth→Memory feedback loop. The gate is applied in the NEXT
+        forward() call and then cleared.
+
+        Parameters
+        ----------
+        gate : torch.Tensor, shape (B, d_k), optional
+            Memory gate from CDAP joint→memory reverse projection.
+            Values in (0, 1). Set to None to clear.
+        """
+        self._external_gate = gate
 
     @staticmethod
     def _rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
