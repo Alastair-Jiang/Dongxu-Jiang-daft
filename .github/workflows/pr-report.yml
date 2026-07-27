@@ -1,0 +1,86 @@
+name: PR Report Generator
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk chromium-browser 2>/dev/null || true
+
+      - name: Install Python dependencies
+        run: pip install pillow
+
+      - name: Install Mermaid CLI
+        run: npm install -g @mermaid-js/mermaid-cli
+
+      - name: Generate PR Report
+        id: report
+        run: python scripts/generate_pr_report.py
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_CREATED: ${{ github.event.pull_request.created_at }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Upload Report as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PR-${{ github.event.pull_request.number }}-Report
+          path: PR-Report.pdf
+          retention-days: 30
+
+      - name: Post PR Comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const prNum = context.payload.pull_request.number;
+            const artifactUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const body = [
+              '## 📄 PR 预更新报告已生成',
+              '',
+              '| 项目 | 详情 |',
+              '|------|------|',
+              `| PR | #${prNum} |`,
+              `| 报告 | [下载 PDF](${artifactUrl}) (Artifact → PR-${prNum}-Report) |`,
+              '',
+              '> 🤖 由 PR Report Generator 自动生成',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNum,
+              body,
+            });
