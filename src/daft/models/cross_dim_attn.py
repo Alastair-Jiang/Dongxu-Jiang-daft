@@ -23,9 +23,14 @@ Joint Space Fusion (key design choice):
       (e.g., memory is uncertain), it silences cross-modulation rather
       than adding noise.
 
-Reverse Projections:
-    → Router:  p'_t = softmax(log p_t + δ · W_expert · j)
-    → Memory:  g_t = σ(W_mem · j)          [additional forget-gate modulation]
+Reverse Projections (three-layer defense for memory gate):
+    → Router:  p'_t = softmax(log p_t + δ · W_expert · j)   [logit-space residual]
+    → Memory:  g_t = 2 · σ(W_mem · j · shrink)             [residual + shrink prior]
+      Layer 1 (residual): gate defaults to 1.0 (identity) via 2×σ(0)
+      Layer 2 (shrink): enhancement direction penalized by learnable decay;
+                        suppression direction unconstrained.
+      Layer 3 (L2 reg): applied in training loss — gate deviation from 1.0 taxed.
+      Toggle: residual_gate=True → new 3-layer; False → original g_t = σ(W·j).
     → Depth:   w_t = softmax(W_depth · j)   [cross-layer retrieval weights]
 
 Design derivation:
@@ -61,6 +66,12 @@ class CrossDimensionAttention(nn.Module):
         Scale factor δ for back-projection signals. Lower = more conservative
         modulation. Default: 1.0 (full modulation during joint training),
         0.1 during Stage 2 (router+memory only).
+    residual_gate : bool
+        If True (default), use residual memory gate with 3-layer defense:
+        Layer 1: gate = 2·σ(raw) → defaults to 1.0 (identity, no modulation).
+        Layer 2: learnable shrink prior penalizes enhancement direction.
+        Layer 3: L2 regularization in training loss (applied externally).
+        If False, use original gate = σ(raw) ∈ (0,1).
     """
 
     def __init__(
@@ -71,6 +82,7 @@ class CrossDimensionAttention(nn.Module):
         n_layers: int = 3,
         joint_dim: int = 64,
         modulation_strength: float = 1.0,
+        residual_gate: bool = True,
     ):
         super().__init__()
         self.n_experts = n_experts
@@ -79,6 +91,7 @@ class CrossDimensionAttention(nn.Module):
         self.n_layers = n_layers
         self.joint_dim = joint_dim
         self.modulation_strength = modulation_strength
+        self.residual_gate = residual_gate
 
         # === Forward projections: each dimension -> joint space ===
         self.expert_to_joint = nn.Sequential(
@@ -118,6 +131,11 @@ class CrossDimensionAttention(nn.Module):
         self.expert_bias_scale = nn.Parameter(torch.zeros(1))
         self.memory_gate_scale = nn.Parameter(torch.zeros(1))
         self.depth_weight_scale = nn.Parameter(torch.zeros(1))
+
+        # Residual gate: learnable shrink prior for enhancement direction
+        # Initialized to 0 (tanh(0)=0) → no penalty. Training pushes it up
+        # if enhancement is overused, auto-constraining gate upper bound.
+        self.memory_gate_decay = nn.Parameter(torch.zeros(1))
 
     def forward(
         self,
@@ -182,7 +200,20 @@ class CrossDimensionAttention(nn.Module):
         # → Memory: forget gate modulation signal
         memory_gate_raw = self.joint_to_memory_gate(joint)         # (B, d_k)
         memory_gate_raw = memory_gate_raw * self.memory_gate_scale.tanh()
-        memory_gate = torch.sigmoid(memory_gate_raw)               # (B, d_k), ∈ (0,1)
+
+        if self.residual_gate:
+            # Layer 2: Shrink prior — enhancement penalized, suppression free
+            # enh > 0 → compressed by (1 - decay); enh ≤ 0 → unchanged
+            enhance_mask = (memory_gate_raw > 0).float()
+            decay = self.memory_gate_decay.tanh().abs()            # ∈ (0, 1)
+            memory_gate_raw = memory_gate_raw * (1.0 - enhance_mask * decay)
+
+            # Layer 1: Residual — gate defaults to 1.0 (identity in multiplication)
+            # 2 × σ(0) = 1.0, so CDAP starts transparent to memory
+            memory_gate = 2.0 * torch.sigmoid(memory_gate_raw)     # (B, d_k), ∈ (0, 2)
+        else:
+            # Original: gate ∈ (0, 1), defaults to 0.5 at initialization
+            memory_gate = torch.sigmoid(memory_gate_raw)           # (B, d_k), ∈ (0, 1)
 
         # → Depth: cross-layer weights
         depth_raw = self.joint_to_depth_weights(joint)             # (B, n_layers)

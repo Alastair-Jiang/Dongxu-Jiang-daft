@@ -19,6 +19,7 @@
 | [CP8](cp8_portfolio.md) | 组合优化 | `pending` | CP7 | 4–5d | Ledoit-Wolf + 马科维兹 |
 | [CP9](cp9_testing.md) | 测试体系 | `pending` | CP3–8 | 5–7d | 80% 覆盖率三层测试 |
 | [CP10](cp10_docs_notebooks.md) | 文档与 Notebook | `pending` | CP7/8/9 | 3–4d | 8 教程 + API 文档 + 复现指南 |
+| [CP11](cp11_gate_residual.md) | Memory Gate 残差化 | `done` | CP5 | 1d | CDAP residual_gate 开关 + shrink prior |
 
 **总预计工作量**: 50–64 天
 
@@ -41,7 +42,7 @@ CP1 ──→ CP2 ──→ CP3 ──→ CP4 ──→ CP5 ──→ CP6 ──
 |------|------|--------|------|
 | `models/router.py` | 188 | 95% | Quantile Balancing 完整 |
 | `models/memory.py` | 230 | 90% | 含 set_external_gate (PR 修复后) |
-| `models/cross_dim_attn.py` | 198 | 90% | 正反向投影完整 |
+| `models/cross_dim_attn.py` | 230 | 95% | residual_gate 开关 + shrink prior (CP11) |
 | `models/hardening.py` | 255 | 85% | 统计+缓存完整 |
 | `models/ensemble.py` | 214 | 80% | 逐样本硬化 (PR 修复后) |
 | `models/experts/base_expert.py` | 141 | 85% | SiTU 激活 + MLP 骨架 |
