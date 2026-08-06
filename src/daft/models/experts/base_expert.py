@@ -139,3 +139,98 @@ class SiTU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(x) * torch.tanh(x)
+
+
+# ======================================================================
+# Shared regime filter helpers
+# ======================================================================
+
+def _compute_adx_mask(panel, threshold: float, above: bool) -> "torch.Tensor":
+    """Compute (T,) bool mask where mean-cross-sectional ADX crosses threshold.
+
+    Parameters
+    ----------
+    panel : Panel  with values (T, N, 5) [open, high, low, close, volume].
+    threshold : float  ADX decision boundary.
+    above : bool  True → ADX > threshold; False → ADX < threshold.
+
+    Returns
+    -------
+    mask : (T,) bool
+    """
+    close = panel.values[..., 3]   # (T, N)
+    high = panel.values[..., 1]
+    low = panel.values[..., 2]
+
+    T, N = close.shape
+    if T < 16:
+        return torch.ones(T, dtype=torch.bool)
+
+    # Directional movement
+    up_move = high[1:] - high[:-1]           # (T-1, N)
+    dn_move = low[:-1] - low[1:]
+    plus_dm = up_move.clamp(min=0) * (up_move > dn_move).float()
+    minus_dm = dn_move.clamp(min=0) * (dn_move > up_move).float()
+
+    tr = torch.maximum(high[1:] - low[1:],
+           torch.maximum((high[1:] - close[:-1]).abs(),
+                         (low[1:] - close[:-1]).abs()))
+
+    span = 14
+    alpha = 2.0 / (span + 1)
+    atr = torch.zeros_like(tr)
+    pdi = torch.zeros_like(tr)
+    mdi = torch.zeros_like(tr)
+    for t in range(tr.size(0)):
+        if t == 0:
+            atr[t] = tr[t]; pdi[t] = plus_dm[t]; mdi[t] = minus_dm[t]
+        else:
+            atr[t] = alpha * tr[t] + (1 - alpha) * atr[t - 1]
+            pdi[t] = alpha * plus_dm[t] + (1 - alpha) * pdi[t - 1]
+            mdi[t] = alpha * minus_dm[t] + (1 - alpha) * mdi[t - 1]
+
+    dx = (pdi - mdi).abs() / (pdi + mdi).clamp(min=1e-8) * 100.0
+    adx = torch.zeros_like(dx)
+    for t in range(dx.size(0)):
+        adx[t] = alpha * (dx[t] if t == 0 else dx[t]) + \
+                 (1 - alpha) * (adx[t - 1] if t > 0 else dx[t])
+
+    # Per-timestep mean ADX across assets
+    mean_adx = adx.nan_to_num(0).mean(dim=-1)   # (T-1,)
+    # Pad first element (no ADX yet) with threshold value
+    mean_adx = torch.cat([mean_adx[:1], mean_adx])
+
+    if above:
+        return mean_adx > threshold
+    return mean_adx < threshold
+
+
+def _compute_vol_mask(panel, quantile: float = 0.80) -> "torch.Tensor":
+    """Compute (T,) bool mask where mean-cross-sectional vol exceeds quantile.
+
+    Uses rolling 20-day std of log-returns, averaged across assets.
+    """
+    close = panel.values[..., 3]   # (T, N)
+    log_c = torch.log(close.clamp(min=1e-8))
+    returns = log_c[1:] - log_c[:-1]     # (T-1, N)
+    T_ret, N = returns.shape
+
+    if T_ret < 21:
+        return torch.ones(panel.T, dtype=torch.bool)
+
+    # Rolling 20d std per asset
+    vol20 = torch.zeros(T_ret, N)
+    for t in range(T_ret):
+        lo = max(0, t - 19)
+        n_obs = t - lo + 1
+        if n_obs >= 2:
+            vol20[t] = returns[lo:t + 1].std(dim=0)
+        # else: stays 0
+
+    vol20 = vol20.nan_to_num(0)
+    mean_vol = vol20.mean(dim=-1)          # (T-1,)
+    threshold = mean_vol[mean_vol > 0].quantile(quantile) if mean_vol.any() else 0.0
+    vol_mask = mean_vol > threshold
+
+    # Pad to length T
+    return torch.cat([vol_mask[:1], vol_mask])

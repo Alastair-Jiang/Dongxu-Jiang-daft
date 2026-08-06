@@ -1,17 +1,9 @@
-"""GPU-vectorized factor computation engine.
+"""GPU-vectorized factor computation with mask propagation.
 
-Provides masked primitives for computing common factor operations on
-Panel tensors without leaking information from non-tradable periods.
+Implements the six core primitives on (T, N) tensors. All operations
+respect the boolean tradability mask.
 
-Derived from ml-quant-trading (Yimin Du, 2025, MIT License).
-
-Primitives:
-    rank(x, mask)          — cross-sectional ranking
-    corr(x, y, mask)       — rolling Pearson correlation
-    ewma(x, span, mask)    — exponentially weighted moving average
-    ts_delta(x, d, mask)   — lagged difference
-    ts_sum(x, d, mask)     — rolling sum
-    ts_std(x, d, mask)     — rolling standard deviation
+Adapted from ml-quant-trading (Yimin Du, 2025, MIT License).
 """
 
 import torch
@@ -19,77 +11,104 @@ import torch.nn.functional as F
 
 
 class TensorFactorEngine:
-    """GPU-accelerated factor computation with mask propagation.
+    """Mask-aware, GPU-accelerated factor computation."""
 
-    All operations respect the boolean tradability mask to prevent
-    upstream contamination from limit-up, limit-down, or suspended periods.
+    # ------------------------------------------------------------------
+    @staticmethod
+    def rank(x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """Cross-sectional percentile rank within each timestep.
 
-    The mask is threaded through every rolling operation: masked values
-    are excluded from the computation window.
-    """
-
-    def __init__(self):
-        pass
-
-    def rank(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        """Cross-sectional rank (percentile) within each time step.
-
-        Parameters
-        ----------
-        x : torch.Tensor, shape (T, N)
-            Feature values.
-        mask : torch.Tensor, shape (T, N), bool
-            Tradability mask.
-
-        Returns
-        -------
-        ranked : torch.Tensor, shape (T, N)
-            Rank percentiles in [0, 1].
+        x    : (T, N)  float
+        mask : (T, N)  bool  (True = valid)
+        →    : (T, N)  float ∈ [0, 1]
         """
-        # PLACEHOLDER — to be implemented
-        raise NotImplementedError("To be implemented after Feature Engine integration.")
+        x_m = x.clone()
+        x_m[~mask] = float("-inf")
+        ranked = x_m.argsort(dim=-1).argsort(dim=-1).float()
+        valid = mask.sum(dim=-1, keepdim=True).clamp(min=1)
+        ranked = ranked / (valid - 1).clamp(min=1)
+        ranked[~mask] = 0.0
+        return ranked
 
+    # ------------------------------------------------------------------
+    @staticmethod
     def corr(
-        self,
-        x: torch.Tensor,
-        y: torch.Tensor,
-        window: int,
-        mask: torch.Tensor,
+        x: torch.Tensor, y: torch.Tensor, window: int, mask: torch.Tensor
     ) -> torch.Tensor:
-        """Rolling Pearson correlation.
+        """Rolling Pearson correlation over `window` timesteps.
 
-        Parameters
-        ----------
-        x, y : torch.Tensor, shape (T, N)
+        x, y   : (T, N)
         window : int
-            Rolling window length.
-        mask : torch.Tensor, shape (T, N), bool
-
-        Returns
-        -------
-        corr : torch.Tensor, shape (T, N)
+        mask   : (T, N)  bool
+        →      : (T, N)  float ∈ [-1, 1]
         """
-        raise NotImplementedError("To be implemented after Feature Engine integration.")
+        x_m = x * mask.float()
+        y_m = y * mask.float()
+        m_f = mask.float()
 
-    def ewma(
-        self,
-        x: torch.Tensor,
-        span: int,
-        mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Exponentially weighted moving average.
+        x_w = x_m.unfold(0, window, 1)
+        y_w = y_m.unfold(0, window, 1)
+        m_w = m_f.unfold(0, window, 1)
 
-        Parameters
-        ----------
-        x : torch.Tensor, shape (T, N)
-        span : int
-            EWMA span (center of mass).
-        mask : torch.Tensor, shape (T, N), bool
+        n = m_w.sum(dim=-1).clamp(min=1)
+        mu_x = x_w.sum(dim=-1) / n
+        mu_y = y_w.sum(dim=-1) / n
+        dx = (x_w - mu_x.unsqueeze(-1)) * m_w
+        dy = (y_w - mu_y.unsqueeze(-1)) * m_w
 
-        Returns
-        -------
-        ewma : torch.Tensor, shape (T, N)
-        """
-        raise NotImplementedError("To be implemented after Feature Engine integration.")
+        cov = (dx * dy).sum(dim=-1)
+        sx = (dx * dx).sum(dim=-1).sqrt().clamp(min=1e-8)
+        sy = (dy * dy).sum(dim=-1).sqrt().clamp(min=1e-8)
+        c = torch.clamp(cov / (sx * sy), -1.0, 1.0)
 
-    # Additional primitives (ts_delta, ts_sum, ts_std) — see docs/architecture.md
+        pad = torch.zeros(window - 1, x.size(1), device=x.device)
+        return torch.cat([pad, c], dim=0)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def ewma(x: torch.Tensor, span: int, mask: torch.Tensor) -> torch.Tensor:
+        """EWMA with span.  x : (T, N), mask : (T, N) bool  →  (T, N)."""
+        alpha = 2.0 / (span + 1.0)
+        x_m = x * mask.float()
+        out = torch.zeros_like(x)
+        run = x_m[0].clone()
+        out[0] = run
+        for t in range(1, x.size(0)):
+            run = alpha * x_m[t] + (1 - alpha) * run
+            out[t] = run
+        return out
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def ts_delta(x: torch.Tensor, d: int, mask: torch.Tensor) -> torch.Tensor:
+        """Lagged diff  x_t − x_{t−d}.  x : (T, N)."""
+        delta = torch.zeros_like(x)
+        delta[d:] = x[d:] - x[:-d]
+        delta[~mask] = 0.0
+        return delta
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def ts_sum(x: torch.Tensor, d: int, mask: torch.Tensor) -> torch.Tensor:
+        """Rolling sum over d steps.  O(T) via cumsum."""
+        x_m = x * mask.float()
+        cs = torch.cumsum(x_m, dim=0)
+        out = cs.clone()
+        out[d:] = cs[d:] - cs[:-d]
+        return out
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def ts_std(x: torch.Tensor, d: int, mask: torch.Tensor) -> torch.Tensor:
+        """Rolling std over d steps (masked, Welford-style)."""
+        x_m = x * mask.float()
+        m_f = mask.float()
+        x_w = x_m.unfold(0, d, 1)
+        m_w = m_f.unfold(0, d, 1)
+        n = m_w.sum(dim=-1).clamp(min=2)
+        mu = x_w.sum(dim=-1) / n
+        dx = (x_w - mu.unsqueeze(-1)) * m_w
+        var = (dx * dx).sum(dim=-1) / (n - 1).clamp(min=1)
+        s = var.sqrt()
+        pad = torch.zeros(d - 1, x.size(1), device=x.device)
+        return torch.cat([pad, s], dim=0)

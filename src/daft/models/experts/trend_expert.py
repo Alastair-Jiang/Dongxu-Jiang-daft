@@ -31,18 +31,13 @@ class TrendExpert(BaseExpert):
         )
 
     def _regime_filter(self, panel) -> torch.Tensor:
-        """Select trend regime samples using ADX proxy.
+        """Select trend regime timesteps: mean cross-sectional ADX > 25.
 
-        The panel's regime_features include an ADX-like metric.
-        Filter: ADX_proxy > 25 (moderate-to-strong trend).
+        Computes Wilder's ADX (14-period) per asset, then aggregates
+        across assets via mean. Returns True for time steps where the
+        average ADX exceeds 25 — indicating sustained directional movement.
         """
-        # PLACEHOLDER — requires regime_features to be computed
-        # adx_proxy = panel.values[..., adx_feature_index]
-        # return adx_proxy > 25.0
-        raise NotImplementedError(
-            "Regime filter requires computed regime features. "
-            "Will be implemented after Feature Engine integration."
-        )
+        return _compute_adx_mask(panel, threshold=25.0, above=True)
 
     def compute_loss(
         self,

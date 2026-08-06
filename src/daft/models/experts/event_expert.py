@@ -32,15 +32,27 @@ class EventExpert(BaseExpert):
         )
 
     def _regime_filter(self, panel) -> torch.Tensor:
-        """Select event-driven regime samples.
+        """Select event-driven regime timesteps.
 
-        Filter: time steps within ±n days of a known event.
-        Requires an external event calendar.
+        Without an external event calendar, the event expert trains on ALL
+        data as a catch-all generalist. If ``panel.metadata`` contains an
+        ``"event_dates"`` key (list of date indices), only ±3-day windows
+        around those events are selected.
         """
-        raise NotImplementedError(
-            "Regime filter requires event calendar integration. "
-            "Will be implemented after data source configuration."
-        )
+        T = panel.values.size(0)
+
+        # Check for event calendar in metadata
+        event_dates = (panel.metadata or {}).get("event_dates", None)
+        if event_dates is not None:
+            mask = torch.zeros(T, dtype=torch.bool)
+            for ed in event_dates:
+                lo = max(0, ed - 3)
+                hi = min(T, ed + 4)
+                mask[lo:hi] = True
+            return mask
+
+        # No calendar → all timesteps (generalist fallback)
+        return torch.ones(T, dtype=torch.bool)
 
     def compute_loss(
         self,
@@ -48,25 +60,24 @@ class EventExpert(BaseExpert):
         target: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
-        """Event expert loss: directional binary cross-entropy.
+        """Event expert loss: direction-weighted MSE.
 
-        Events have discrete outcomes — the model should predict direction
-        with high conviction rather than precise magnitude.
+        Since the expert's output is SiTU-activated (range [-1, 1]),
+        we use MSE with a 5× penalty on directional errors rather than
+        BCE (which expects either raw logits or [0,1] probabilities).
 
-        L = BCE(sigmoid(ŷ), 1[target > 0])
+        This is consistent with how the ensemble fuses expert signals:
+        all experts produce magnitude-comparable outputs in [-1, 1].
+
+        L = Σ masked [ (y - ŷ)² · (1 + 4 · 1[sign(ŷ) ≠ sign(y)]) ]
         """
         pred = pred.squeeze(-1)
         target = target.squeeze(-1)
         mask = mask.squeeze(-1)
 
-        # Binarize target: care about direction, not magnitude
-        target_binary = (target > 0).float()
+        se = (target - pred) ** 2
+        sign_mismatch = (torch.sign(pred) != torch.sign(target)).float()
+        adjusted_se = se * (1.0 + 4.0 * sign_mismatch)
 
-        # Weighted BCE: penalize missed events more than false alarms
-        pos_weight = torch.tensor(2.0, device=pred.device)
-        bce = F.binary_cross_entropy_with_logits(
-            pred, target_binary, pos_weight=pos_weight, reduction='none'
-        )
-
-        loss = (bce * mask).sum() / mask.sum().clamp(min=1)
+        loss = (adjusted_se * mask).sum() / mask.sum().clamp(min=1)
         return loss

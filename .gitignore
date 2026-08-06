@@ -27,12 +27,12 @@ env/
 *.ipynb_checkpoints/
 
 # Data (placeholder — actual data not committed)
-data/
+/data/
 *.parquet
 *.csv
 *.h5
 *.pkl
-!data/.gitkeep
+!/data/.gitkeep
 
 # Models (placeholder — trained weights not committed by default)
 checkpoints/

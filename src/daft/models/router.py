@@ -19,6 +19,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class SiTU(nn.Module):
+    """Sigmoid Tanh Unit — K3 activation: σ(x) ⊙ tanh(x).
+
+    Naturally bounded in [-1, 1] with smooth gradients.
+    Critical for MoE routing stability — prevents expert activation
+    magnitude drift that would distort router gradients.
+    """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(x) * torch.tanh(x)
+
+
 class RegimeRouter(nn.Module):
     """Market regime router using Stable LatentMoE design.
 
@@ -76,8 +87,9 @@ class RegimeRouter(nn.Module):
         self.register_buffer("expert_bias", torch.zeros(n_experts))
         self.register_buffer("activation_counts", torch.zeros(n_experts))
 
-        # Activation function
-        self.activation = nn.SiLU()
+        # SiTU activation (K3 spec): σ(x)·tanh(x), naturally bounded in [-1, 1]
+        # Critical for MoE: prevents expert activation magnitude drift
+        self.activation = SiTU()
 
     def forward(
         self,

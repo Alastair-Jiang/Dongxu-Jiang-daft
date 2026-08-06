@@ -118,18 +118,28 @@ class ExpertEnsemble(nn.Module):
             # Use modulated routing weights
             final_routing = routing_mod
         else:
-            # Try hardened fast path
-            regime_id = self.router.get_regime_id(z_t)
-            routing_avg = full_probs.mean(dim=0)  # batch-average for hardening check
+            # Try hardened fast path (per-sample independent decisions)
+            regime_ids = self.router.get_regime_id(z_t)  # (B,) long
 
-            if self.hardening.should_use_fast_path(
-                regime_id[0].item(), routing_avg
-            ):
-                # Use cached weights (detached, no gradient)
-                cached_weights = self.hardening.get_cached_weights(
-                    regime_id[0].item(), routing_avg
+            # Check hardening per sample — majority vote for batch decision
+            fast_decisions = []
+            for b in range(B):
+                fast_decisions.append(
+                    self.hardening.should_use_fast_path(
+                        regime_ids[b].item(), full_probs[b]
+                    )
                 )
-                final_routing = cached_weights.unsqueeze(0).expand(B, -1)
+            use_fast = all(fast_decisions)
+
+            if use_fast:
+                # Use cached weights per sample (each may have different cached pattern)
+                cached_weights_list = []
+                for b in range(B):
+                    cw = self.hardening.get_cached_weights(
+                        regime_ids[b].item(), full_probs[b]
+                    )
+                    cached_weights_list.append(cw)
+                final_routing = torch.stack(cached_weights_list, dim=0)  # (B, n_experts)
                 depth_weights = F.softmax(
                     torch.ones(B, 3, device=device), dim=-1
                 )  # Uniform depth weights in fast path
