@@ -65,7 +65,7 @@ class CrossDimensionAttention(nn.Module):
 
     def __init__(
         self,
-        n_experts: int = 8,
+        n_experts: int = 10,
         d_k: int = 128,
         d_v: int = 64,
         n_layers: int = 3,

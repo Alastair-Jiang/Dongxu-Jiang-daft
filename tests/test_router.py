@@ -17,7 +17,7 @@ class TestInit:
         r = RegimeRouter()
         assert r.input_dim == 200
         assert r.latent_dim == 16
-        assert r.n_experts == 8
+        assert r.n_experts == 10
         assert r.top_k == 3
         assert r.temperature == 1.0
 

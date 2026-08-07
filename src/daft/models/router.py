@@ -59,7 +59,7 @@ class RegimeRouter(nn.Module):
         self,
         input_dim: int = 200,
         latent_dim: int = 16,
-        n_experts: int = 8,
+        n_experts: int = 10,
         top_k: int = 3,
         temperature: float = 1.0,
         noisy_gating_std: float = 0.1,

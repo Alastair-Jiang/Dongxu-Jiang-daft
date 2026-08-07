@@ -13,7 +13,9 @@ from daft.models.memory import KDAMarketMemory
 from daft.models.cross_dim_attn import CrossDimensionAttention
 from daft.models.hardening import HardeningEngine
 from daft.models.ensemble import ExpertEnsemble
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert
+from daft.models.experts import (
+    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
+)
 
 
 # ── Shared constants ────────────────────────────────────────────────────
@@ -23,11 +25,12 @@ from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, E
 INPUT_DIM = 200       # Market state vector dimension
 D_K = 128             # Memory key dimension (number of slots)
 D_V = 64              # Memory value dimension
-N_EXPERTS = 8         # Total expert pool size
+N_EXPERTS = 10        # Total expert pool size (5 types × 2 instances)
 TOP_K = 3             # Experts activated per forward pass
 N_LAYERS = 3          # Feature hierarchy depth
 JOINT_DIM = 64        # CDAP joint latent space dimension
 LATENT_DIM = 16       # Router latent regime space dimension
+N_REGIMES = 10        # Regime count (= n_experts, one per expert instance)
 BATCH_SIZES = [1, 4, 32]  # Standard batch sizes for shape tests
 
 
@@ -68,7 +71,7 @@ def cdap():
 def hardening():
     """HardeningEngine with test-friendly low threshold."""
     return HardeningEngine(
-        n_regimes=N_EXPERTS, n_experts=N_EXPERTS,
+        n_regimes=N_REGIMES, n_experts=N_EXPERTS,
         threshold=20, min_confidence=0.1, entropy_multiplier=2.0,
     )
 
@@ -76,24 +79,30 @@ def hardening():
 # ── Ensemble fixture ────────────────────────────────────────────────────
 
 
-def _make_expert_pool(n_experts: int = 8) -> nn.ModuleList:
-    """Create a balanced pool of heterogeneous strategy experts."""
+def _make_expert_pool(n_experts: int = 10) -> nn.ModuleList:
+    """Create a balanced pool of heterogeneous strategy experts.
+
+    Order: 2×Trend → 2×Reversal → 2×Volatility → 2×Event → 2×Momentum.
+    """
     expert_types = [
-        (TrendExpert, 64), (ReversalExpert, 64),
-        (VolatilityExpert, 48), (EventExpert, 48),
+        (TrendExpert, 64), (TrendExpert, 64),
+        (ReversalExpert, 64), (ReversalExpert, 64),
+        (VolatilityExpert, 48), (VolatilityExpert, 48),
+        (EventExpert, 48), (EventExpert, 48),
+        (MomentumExpert, 64), (MomentumExpert, 64),
     ]
     experts = []
-    for i in range(n_experts):
-        cls, hidden_dim = expert_types[i % 4]
+    for i in range(min(n_experts, len(expert_types))):
+        cls, hidden_dim = expert_types[i]
         experts.append(cls(input_dim=INPUT_DIM, hidden_dim=hidden_dim))
     return nn.ModuleList(experts)
 
 
 @pytest.fixture
 def ensemble():
-    """Full ExpertEnsemble with all DAFT components."""
+    """Full ExpertEnsemble with all DAFT components (10 experts)."""
     return ExpertEnsemble(
-        experts=_make_expert_pool(8),
+        experts=_make_expert_pool(10),
         router=RegimeRouter(input_dim=INPUT_DIM, latent_dim=LATENT_DIM,
                             n_experts=N_EXPERTS, top_k=TOP_K),
         memory=KDAMarketMemory(d_k=D_K, d_v=D_V, d_feature=INPUT_DIM,
@@ -102,7 +111,7 @@ def ensemble():
             n_experts=N_EXPERTS, d_k=D_K, d_v=D_V,
             n_layers=N_LAYERS, joint_dim=JOINT_DIM,
         ),
-        hardening=HardeningEngine(n_regimes=N_EXPERTS, n_experts=N_EXPERTS,
+        hardening=HardeningEngine(n_regimes=N_REGIMES, n_experts=N_EXPERTS,
                                   threshold=100),
     )
 
@@ -111,7 +120,7 @@ def ensemble():
 def ensemble_low_threshold():
     """Ensemble with low hardening threshold for fast-path testing."""
     return ExpertEnsemble(
-        experts=_make_expert_pool(8),
+        experts=_make_expert_pool(10),
         router=RegimeRouter(input_dim=INPUT_DIM, latent_dim=LATENT_DIM,
                             n_experts=N_EXPERTS, top_k=TOP_K),
         memory=KDAMarketMemory(d_k=D_K, d_v=D_V, d_feature=INPUT_DIM,
@@ -120,6 +129,6 @@ def ensemble_low_threshold():
             n_experts=N_EXPERTS, d_k=D_K, d_v=D_V,
             n_layers=N_LAYERS, joint_dim=JOINT_DIM,
         ),
-        hardening=HardeningEngine(n_regimes=N_EXPERTS, n_experts=N_EXPERTS,
+        hardening=HardeningEngine(n_regimes=N_REGIMES, n_experts=N_EXPERTS,
                                   threshold=3, min_confidence=0.01),
     )

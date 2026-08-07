@@ -52,8 +52,8 @@ class HardeningEngine:
 
     def __init__(
         self,
-        n_regimes: int = 8,
-        n_experts: int = 8,
+        n_regimes: int = 10,
+        n_experts: int = 10,
         threshold: int = 100,
         min_confidence: float = 0.95,
         entropy_multiplier: float = 2.0,

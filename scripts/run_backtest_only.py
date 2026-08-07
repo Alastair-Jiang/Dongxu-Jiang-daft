@@ -6,7 +6,7 @@ import torch, torch.nn as nn
 
 from daft.data.loaders import DataLoader
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert
+from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
 from daft.models.cross_dim_attn import CrossDimensionAttention
@@ -25,6 +25,7 @@ experts = nn.ModuleList([
     ReversalExpert(input_dim=200, hidden_dim=64), ReversalExpert(input_dim=200, hidden_dim=64),
     VolatilityExpert(input_dim=200, hidden_dim=48), VolatilityExpert(input_dim=200, hidden_dim=48),
     EventExpert(input_dim=200, hidden_dim=48), EventExpert(input_dim=200, hidden_dim=48),
+    MomentumExpert(input_dim=200, hidden_dim=64), MomentumExpert(input_dim=200, hidden_dim=64),
 ])
 model = ExpertEnsemble(
     experts,

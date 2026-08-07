@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert,
+    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
 )
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
@@ -61,6 +61,8 @@ def build_experts():
         VolatilityExpert(input_dim=200, hidden_dim=48),
         EventExpert(input_dim=200, hidden_dim=48),
         EventExpert(input_dim=200, hidden_dim=48),
+        MomentumExpert(input_dim=200, hidden_dim=64),
+        MomentumExpert(input_dim=200, hidden_dim=64),
     ])
 
 

@@ -32,7 +32,7 @@ from daft.data.loaders import DataLoader
 from daft.data.panel import Panel
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert,
+    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
 )
 from daft.training.expert_trainer import Stage1ExpertTrainer
 
@@ -81,6 +81,8 @@ def build_experts() -> nn.ModuleList:
         VolatilityExpert(input_dim=200, hidden_dim=48),
         EventExpert(input_dim=200, hidden_dim=48),
         EventExpert(input_dim=200, hidden_dim=48),
+        MomentumExpert(input_dim=200, hidden_dim=64),
+        MomentumExpert(input_dim=200, hidden_dim=64),
     ])
 
 

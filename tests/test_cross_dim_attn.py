@@ -8,7 +8,7 @@ from daft.models.cross_dim_attn import CrossDimensionAttention
 
 # Fixture `cdap` is defined in conftest.py (shared across all tests)
 BATCH_SIZES = [1, 4, 32]
-N_EXPERTS = 8
+N_EXPERTS = 10
 D_K = 128
 D_V = 64
 N_LAYERS = 3
@@ -38,7 +38,7 @@ def _make_inputs(B, device=None):
 class TestInit:
     def test_default_params(self):
         c = CrossDimensionAttention()
-        assert c.n_experts == 8
+        assert c.n_experts == 10
         assert c.d_k == 128
         assert c.d_v == 64
         assert c.n_layers == 3

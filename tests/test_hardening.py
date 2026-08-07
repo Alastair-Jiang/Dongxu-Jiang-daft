@@ -31,8 +31,8 @@ ROUTING_ALT_PATTERN = torch.tensor(
 class TestInit:
     def test_default_params(self):
         h = HardeningEngine()
-        assert h.n_regimes == 8
-        assert h.n_experts == 8
+        assert h.n_regimes == 10
+        assert h.n_experts == 10
         assert h.threshold == 100
         assert h.min_confidence == 0.95
         assert h.entropy_multiplier == 2.0

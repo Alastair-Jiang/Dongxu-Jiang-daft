@@ -39,7 +39,7 @@ class TestForward:
         s_t, layers = _make_batch(B)
         out = ensemble(s_t, layers, mode="train")
         assert out["signal"].shape == (B, 1)
-        assert out["routing_probs"].shape == (B, 8)
+        assert out["routing_probs"].shape == (B, 10)
         assert out["depth_weights"].shape == (B, 3)
         assert out["fused_layers"].shape == (B, D_V)
 
@@ -48,14 +48,14 @@ class TestForward:
         s_t, layers = _make_batch(B)
         out = ensemble(s_t, layers, mode="val")
         assert out["signal"].shape == (B, 1)
-        assert out["routing_probs"].shape == (B, 8)
+        assert out["routing_probs"].shape == (B, 10)
 
     @pytest.mark.parametrize("B", BATCH_SIZES)
     def test_inference_mode(self, ensemble, B):
         s_t, layers = _make_batch(B)
         out = ensemble(s_t, layers, mode="inference", use_hardening=False)
         assert out["signal"].shape == (B, 1)
-        assert out["routing_probs"].shape == (B, 8)
+        assert out["routing_probs"].shape == (B, 10)
 
     @pytest.mark.parametrize("B", BATCH_SIZES)
     def test_signal_is_finite(self, ensemble, B):
@@ -145,7 +145,7 @@ class TestHardeningIntegration:
             f"fast={stats['n_fast_path']}, slow={stats['n_slow_path']}"
         )
         assert out["signal"].isfinite().all()
-        assert out["routing_probs"].shape == (4, 8)
+        assert out["routing_probs"].shape == (4, 10)
         assert out["fused_layers"].shape == (4, D_V)
 
     def test_fast_path_vs_slow_path_consistency(self, ensemble_low_threshold):
@@ -164,7 +164,7 @@ class TestHardeningIntegration:
         out_slow = ens(s_t, layers, mode="inference", use_hardening=False)
 
         assert out_slow["signal"].isfinite().all()
-        assert out_slow["routing_probs"].shape == (4, 8)
+        assert out_slow["routing_probs"].shape == (4, 10)
         assert out_slow["fused_layers"].shape == (4, D_V)
 
 
