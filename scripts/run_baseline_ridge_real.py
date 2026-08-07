@@ -66,7 +66,7 @@ def main():
     print(f"    可交易覆盖率: {n_tradable:.1%}")
 
     # ---------- 2. 特征 + 目标 ----------
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_t_raw = extractor(panel)
     s_t_raw = torch.nan_to_num(s_t_raw, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)

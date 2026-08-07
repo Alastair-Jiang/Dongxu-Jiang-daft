@@ -212,7 +212,7 @@ class RouterTrainer:
     # ------------------------------------------------------------------
     def _build_dataset(self, panel: Panel):
         """Build s_t, targets, mask from panel."""
-        extractor = RegimeFeatureExtractor(n_output=200)
+        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
         with torch.no_grad():
             s_t_raw = extractor(panel)                     # (T, N, 200)
 

@@ -100,7 +100,7 @@ def generate_oos_signals(model, layer_proj, panel, mu, sd, device):
     Memory is warmed up on the panel sequentially (causal: state at t only
     depends on t and earlier), so the test segment starts from a warm state.
     """
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_t_raw = extractor(panel)
     s_t_raw = torch.nan_to_num(s_t_raw, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)
@@ -210,7 +210,7 @@ def main():
 
     # ---------- 5. OOS signals: normalization from TRAIN only ----------
     print("\n[5/6] 样本外信号生成 (标准化统计量仅来自 train 段)...")
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     mu, sd = compute_normalization(train_panel, extractor)
     signals_full = generate_oos_signals(model, layer_proj, panel, mu, sd, device)
     print(f"      信号: {signals_full.shape}")

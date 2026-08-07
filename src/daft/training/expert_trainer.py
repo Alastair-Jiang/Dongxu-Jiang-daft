@@ -74,7 +74,7 @@ class Stage1ExpertTrainer:
         self.device = device or torch.device("cpu")
 
         # --- Build s_t: market state vectors via RegimeFeatureExtractor ---
-        extractor = RegimeFeatureExtractor(n_output=200)
+        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
         with torch.no_grad():
             s_t_raw = extractor(panel)                     # (T, N, 200)
 

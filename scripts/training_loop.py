@@ -6,6 +6,10 @@ Runs a mini 3-stage training cycle on synthetic data to demonstrate:
   Stage 3: Joint fine-tuning
   Stage 4: Hardening statistics collection
 
+Uses RegimeFeatureExtractor to compute proper 200-dimensional market state
+vectors (s_t) from the raw panel data, replacing the previous hand-crafted
+concatenation of raw returns and volatility.
+
 Outputs:
   - Training metrics per stage
   - Hardening stats
@@ -27,6 +31,8 @@ import torch.nn.functional as F
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from daft.data.loaders import DataLoader
+from daft.backtest.engine import BacktestEngine
+from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
@@ -39,10 +45,10 @@ from daft.models.ensemble import ExpertEnsemble
 # Config
 # ======================================================================
 DEVICE = torch.device("cpu")
-BATCH_SIZE = 128
+BATCH_SIZE = 16  # Small batch for daily-frequency demo data
 N_EPOCHS_STAGE1 = 5
 N_EPOCHS_STAGE2 = 10
-N_EPOCHS_STAGE3 = 5
+N_EPOCHS_STAGE3 = 15
 LR = 0.001
 
 RESULTS = {}
@@ -54,11 +60,25 @@ def banner(msg):
     print(f"{'='*60}")
 
 
-def make_batch(panel, batch_size, start_idx):
-    """Create mock training batches from panel data."""
-    T, N, F = panel.shape
-    returns = panel.values[..., 1]
-    vol = panel.values[..., 4]
+def make_batch(s_t_full, panel, batch_size, start_idx):
+    """Create training batches using pre-computed market state vectors.
+
+    Uses the RegimeFeatureExtractor's output (T, N, 200) to get proper
+    market state vectors instead of hand-crafted feature concatenation.
+
+    Parameters
+    ----------
+    s_t_full : torch.Tensor, shape (T, N, 200)
+        Pre-computed market state vectors from RegimeFeatureExtractor.
+    panel : Panel
+        Raw market data panel (for target extraction).
+    batch_size : int
+        Number of time steps per batch.
+    start_idx : int
+        Starting time index.
+    """
+    T, N = s_t_full.shape[0], s_t_full.shape[1]
+    returns = panel.values[..., 1]  # (T, N): log_return
 
     end = min(start_idx + batch_size, T - 5)
     actual_batch = end - start_idx
@@ -66,22 +86,22 @@ def make_batch(panel, batch_size, start_idx):
         return None, None, None, start_idx
 
     idx = torch.arange(start_idx, end)
-    sr = returns[idx]
-    sv = vol[idx]
-    s_batch = torch.cat([sr, sv, sr.roll(1, 0), sv.roll(1, 0), sr.roll(5, 0)], dim=-1)
-    s_t = s_batch[:, :200]
-    if s_t.size(1) < 200:
-        pad = torch.zeros(actual_batch, 200 - s_t.size(1))
-        s_t = torch.cat([s_t, pad], dim=-1)
 
-    # Target: next-bar return
-    target = returns[idx + 1][:, :1] if torch.isnan(returns[idx + 1]).sum() == 0 else returns[idx][:, :1]
+    # Use s_t from RegimeFeatureExtractor: take the cross-sectional
+    # mean across all stocks as the aggregate market state for each timestep.
+    # Shape: (B, 200)
+    s_t = s_t_full[idx].mean(dim=1)  # (batch, N, 200) → (batch, 200)
+
+    # Target: next-bar cross-sectional mean return
+    next_rets = returns[idx + 1]  # (batch, N)
+    target = next_rets.mean(dim=-1, keepdim=True)  # (batch, 1)
+
     # Match batch size
     min_len = min(s_t.size(0), target.size(0))
     s_t = s_t[:min_len]
     target = target[:min_len]
 
-    # Mock 3-layer features
+    # Mock 3-layer features (these will be replaced by real factor layers later)
     mock_layers = [
         torch.randn(min_len, 64),
         torch.randn(min_len, 64),
@@ -91,15 +111,15 @@ def make_batch(panel, batch_size, start_idx):
     return s_t, target, mock_layers, end
 
 
-def run_epoch(model, panel, optimizer=None, mode="train", use_hardening=False):
+def run_epoch(model, s_t_full, panel, optimizer=None, mode="train", use_hardening=False):
     """Run one epoch over the synthetic data."""
     total_loss = 0.0
     n_batches = 0
     idx = 0
-    T = panel.shape[0]
+    T = s_t_full.shape[0]
 
     while idx < T - BATCH_SIZE:
-        result = make_batch(panel, BATCH_SIZE, idx)
+        result = make_batch(s_t_full, panel, BATCH_SIZE, idx)
         if result[0] is None:
             break
         s_t, target, mock_layers, idx = result
@@ -125,6 +145,83 @@ def run_epoch(model, panel, optimizer=None, mode="train", use_hardening=False):
     return total_loss / max(n_batches, 1), n_batches
 
 
+@torch.no_grad()
+def evaluate(model, s_t_full, panel):
+    """Run a full pass over hold-out data and compute validation metrics.
+
+    Returns
+    -------
+    metrics : dict
+        eval_loss, routing_entropy, sharpe, max_drawdown, n_batches
+    """
+    model.eval()
+    total_loss = 0.0
+    n_batches = 0
+    idx = 0
+    T = s_t_full.shape[0]
+
+    # Collect for Sharpe / MaxDD
+    all_signals = []
+    all_targets = []
+    routing_entropies = []
+
+    # Use last 20% of panel as validation (no random shuffle needed for synthetic)
+    val_start = int(T * 0.8)
+    idx = val_start
+
+    while idx < T - BATCH_SIZE:
+        result = make_batch(s_t_full, panel, BATCH_SIZE, idx)
+        if result[0] is None:
+            break
+        s_t, target, mock_layers, idx = result
+
+        outputs = model(s_t, mock_layers, mode="val")
+        signal = outputs["signal"]
+        loss = F.mse_loss(
+            signal, target.unsqueeze(-1) if target.dim() == 1 else target
+        )
+        total_loss += loss.item()
+        n_batches += 1
+
+        all_signals.append(signal.squeeze(-1))
+        all_targets.append(target.squeeze(-1) if target.dim() == 1 else target.squeeze(0))
+
+        # Routing entropy per batch (0 = dead expert, log(n_experts) = fully uniform)
+        probs = outputs["routing_probs"]
+        ent = -(probs * (probs + 1e-8).log()).sum(dim=-1).mean().item()
+        routing_entropies.append(ent)
+
+    if n_batches == 0:
+        return {"eval_loss": float("nan"), "routing_entropy": float("nan"),
+                "sharpe": float("nan"), "max_drawdown": float("nan"),
+                "n_batches": 0}
+
+    # Aggregate
+    all_signals = torch.cat(all_signals)
+    all_targets = torch.cat(all_targets)
+
+    # Strategy return = signal direction × actual return
+    # (a simplified P&L proxy for demo purposes)
+    min_len = min(all_signals.size(0), all_targets.size(0))
+    strategy_returns = all_signals[:min_len].sign() * all_targets[:min_len]
+
+    sharpe = BacktestEngine.sharpe_ratio(strategy_returns)
+    cumret = (1.0 + strategy_returns).cumprod(dim=0)
+    mdd = BacktestEngine.max_drawdown(cumret)
+
+    avg_entropy = sum(routing_entropies) / len(routing_entropies)
+    max_entropy = 2.0794  # ln(8) — maximum possible entropy for 8 experts
+
+    return {
+        "eval_loss": total_loss / n_batches,
+        "routing_entropy": avg_entropy,
+        "routing_entropy_ratio": avg_entropy / max_entropy,
+        "sharpe": sharpe,
+        "max_drawdown": mdd,
+        "n_batches": n_batches,
+    }
+
+
 # ======================================================================
 # Setup
 # ======================================================================
@@ -134,10 +231,28 @@ print(f"  Stage-1 epochs: {N_EPOCHS_STAGE1}")
 print(f"  Stage-2 epochs: {N_EPOCHS_STAGE2}")
 print(f"  Stage-3 epochs: {N_EPOCHS_STAGE3}")
 
-# Load data
-loader = DataLoader({"source": "synthetic", "n_stocks": 50, "n_days": 300, "frequency": "5min"})
+# Load data (daily frequency for fast feature extraction demo)
+loader = DataLoader({"source": "synthetic", "n_stocks": 20, "n_days": 500, "frequency": "1d"})
 panel = loader.load()
 print(f"  Data: {panel.shape}")
+
+# ── Feature Engineering: compute proper 200-dim market state vectors ──
+banner("FEATURE ENGINEERING")
+feature_extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+feature_extractor.eval()
+
+t_feat_start = time.time()
+with torch.no_grad():
+    s_t_full = feature_extractor.forward(panel)  # (T, N, 200)
+dt_feat = time.time() - t_feat_start
+
+print(f"  s_t shape: {s_t_full.shape}")
+print(f"  s_t stats: mean={s_t_full.mean():.4f}  std={s_t_full.std():.4f}  "
+      f"min={s_t_full.min():.4f}  max={s_t_full.max():.4f}")
+print(f"  Feature extraction time: {dt_feat:.1f}s")
+print(f"  Routing entropy (before training): "
+      f"{-(torch.ones(8)/8 * (torch.ones(8)/8 + 1e-8).log()).sum():.3f} "
+      f"(uniform routing = maximum entropy)")
 
 # Build model
 experts_full = nn.ModuleList([
@@ -174,16 +289,21 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 stage1_losses = []
 t0 = time.time()
 for epoch in range(N_EPOCHS_STAGE1):
-    loss, n = run_epoch(model, panel, optimizer, mode="train")
+    loss, n = run_epoch(model, s_t_full, panel, optimizer, mode="train")
     stage1_losses.append(loss)
     print(f"  Epoch {epoch+1:3d}/{N_EPOCHS_STAGE1}  loss={loss:.6f}  batches={n}")
 
 dt1 = time.time() - t0
+eval1 = evaluate(model, s_t_full, panel)
+print(f"  Eval: loss={eval1['eval_loss']:.6f}  "
+      f"routing_ent={eval1['routing_entropy']:.3f}  "
+      f"sharpe={eval1['sharpe']:.3f}  mdd={eval1['max_drawdown']:.3f}")
 RESULTS["stage1"] = {
     "epochs": N_EPOCHS_STAGE1,
     "final_loss": stage1_losses[-1],
     "loss_trajectory": stage1_losses,
     "time_seconds": round(dt1, 1),
+    "eval": eval1,
 }
 
 # ======================================================================
@@ -210,17 +330,22 @@ optimizer2 = torch.optim.Adam(
 stage2_losses = []
 t0 = time.time()
 for epoch in range(N_EPOCHS_STAGE2):
-    loss, n = run_epoch(model, panel, optimizer2, mode="train")
+    loss, n = run_epoch(model, s_t_full, panel, optimizer2, mode="train")
     stage2_losses.append(loss)
     if epoch % 3 == 0 or epoch == N_EPOCHS_STAGE2 - 1:
         print(f"  Epoch {epoch+1:3d}/{N_EPOCHS_STAGE2}  loss={loss:.6f}  batches={n}")
 
 dt2 = time.time() - t0
+eval2 = evaluate(model, s_t_full, panel)
+print(f"  Eval: loss={eval2['eval_loss']:.6f}  "
+      f"routing_ent={eval2['routing_entropy']:.3f}  "
+      f"sharpe={eval2['sharpe']:.3f}  mdd={eval2['max_drawdown']:.3f}")
 RESULTS["stage2"] = {
     "epochs": N_EPOCHS_STAGE2,
     "final_loss": stage2_losses[-1],
     "loss_trajectory": stage2_losses,
     "time_seconds": round(dt2, 1),
+    "eval": eval2,
 }
 
 # ======================================================================
@@ -228,26 +353,60 @@ RESULTS["stage2"] = {
 # ======================================================================
 banner("STAGE 3: Joint Fine-tuning")
 
-# Unfreeze everything, full CDAP
+# Warmup phase (epochs 1-3): only train CDAP scales, everything else frozen.
+# This lets the modulation pathway establish non-zero activation before
+# backpropagating through the full model (avoids zero-init immunity zone).
+N_WARMUP = 3
+
+# Phase A: CDAP scale warmup
+for p in model.parameters():
+    p.requires_grad = False
+# Unfreeze only CDAP modulation scales
+for name, param in model.cross_dim_attn.named_parameters():
+    if "scale" in name:
+        param.requires_grad = True
+model.cross_dim_attn.modulation_strength = 0.5  # moderate start
+
+optimizer_warmup = torch.optim.Adam(
+    [p for p in model.parameters() if p.requires_grad], lr=LR * 0.5
+)
+
+print(f"  Warmup ({N_WARMUP} epochs): CDAP scales only, δ=0.5, lr={LR*0.5}")
+for epoch in range(N_WARMUP):
+    loss, n = run_epoch(model, s_t_full, panel, optimizer_warmup, mode="train")
+    s = model.cross_dim_attn
+    print(f"  Warmup {epoch+1}/{N_WARMUP}  loss={loss:.6f}  "
+          f"expert_bias_scale={s.expert_bias_scale.item():.4f}  "
+          f"mem_gate_scale={s.memory_gate_scale.item():.4f}  "
+          f"depth_scale={s.depth_weight_scale.item():.4f}")
+
+# Phase B: Full joint training
 for p in model.parameters():
     p.requires_grad = True
 model.cross_dim_attn.modulation_strength = 1.0
 
-optimizer3 = torch.optim.Adam(model.parameters(), lr=LR * 0.01)
+optimizer3 = torch.optim.Adam(model.parameters(), lr=LR * 0.1)  # 1e-4, not 1e-5
 
 stage3_losses = []
 t0 = time.time()
-for epoch in range(N_EPOCHS_STAGE3):
-    loss, n = run_epoch(model, panel, optimizer3, mode="train")
+n_train_epochs = N_EPOCHS_STAGE3 - N_WARMUP
+for epoch in range(n_train_epochs):
+    loss, n = run_epoch(model, s_t_full, panel, optimizer3, mode="train")
     stage3_losses.append(loss)
-    print(f"  Epoch {epoch+1:3d}/{N_EPOCHS_STAGE3}  loss={loss:.6f}  batches={n}")
+    print(f"  Epoch {epoch+1:3d}/{n_train_epochs}  loss={loss:.6f}  batches={n}")
 
 dt3 = time.time() - t0
+eval3 = evaluate(model, s_t_full, panel)
+print(f"  Eval: loss={eval3['eval_loss']:.6f}  "
+      f"routing_ent={eval3['routing_entropy']:.3f}  "
+      f"sharpe={eval3['sharpe']:.3f}  mdd={eval3['max_drawdown']:.3f}")
 RESULTS["stage3"] = {
-    "epochs": N_EPOCHS_STAGE3,
-    "final_loss": stage3_losses[-1],
+    "warmup_epochs": N_WARMUP,
+    "train_epochs": n_train_epochs,
+    "final_loss": stage3_losses[-1] if stage3_losses else float("nan"),
     "loss_trajectory": stage3_losses,
     "time_seconds": round(dt3, 1),
+    "eval": eval3,
 }
 
 # ======================================================================
@@ -262,22 +421,23 @@ t0 = time.time()
 with torch.no_grad():
     # Run hardening collection (non-hardened first, then check stats)
     idx = 0
-    T = panel.shape[0]
+    T = s_t_full.shape[0]
     n_steps = 0
     while idx < T - BATCH_SIZE:
-        result = make_batch(panel, BATCH_SIZE, idx)
+        result = make_batch(s_t_full, panel, BATCH_SIZE, idx)
         if result[0] is None:
             break
         s_t, target, mock_layers, idx = result
 
         outputs = model(s_t, mock_layers, mode="inference", use_hardening=True)
         n_steps += 1
-        if n_steps >= 50:
+        if n_steps >= 200:
             break
 
     stats = model.hardening.get_stats()
     hardening_stats.append(stats)
 
+eval4 = evaluate(model, s_t_full, panel)
 dt4 = time.time() - t0
 
 print(f"  Hardening stats after collection:")
@@ -288,8 +448,9 @@ print(f"    Fast/Slow/Regime-shifts: {stats['n_fast_path']}/{stats['n_slow_path'
 
 RESULTS["stage4"] = {
     "hardening_stats": {k: v for k, v in stats.items() if isinstance(v, (int, float))},
-    "collection_steps": 50,
+    "collection_steps": 200,
     "time_seconds": round(dt4, 1),
+    "eval": eval4,
 }
 
 # ======================================================================
@@ -298,22 +459,56 @@ RESULTS["stage4"] = {
 banner("TRAINING SUMMARY")
 
 total_time = dt1 + dt2 + dt3 + dt4
-RESULTS["summary"] = {
-    "total_params": total_params,
-    "total_time_seconds": round(total_time, 1),
-    "device": str(DEVICE),
-    "stage1_final_loss": stage1_losses[-1],
-    "stage2_final_loss": stage2_losses[-1],
-    "stage3_final_loss": stage3_losses[-1],
-    "loss_reduction_pct": round((stage1_losses[-1] - stage3_losses[-1]) / stage1_losses[-1] * 100, 1),
+
+# Use eval metrics for stage-to-stage comparison (not raw training loss,
+# since different stages optimize different subsets of parameters).
+eval_losses = {
+    "stage1": eval1["eval_loss"],
+    "stage2": eval2["eval_loss"],
+    "stage3": eval3["eval_loss"],
+}
+eval_sharpes = {
+    "stage1": eval1["sharpe"],
+    "stage2": eval2["sharpe"],
+    "stage3": eval3["sharpe"],
 }
 
-print(f"  Loss trajectory:")
-print(f"    Stage 1 (expert pre-train):   {stage1_losses[-1]:.6f}")
-print(f"    Stage 2 (router+memory):       {stage2_losses[-1]:.6f}")
-print(f"    Stage 3 (joint fine-tune):     {stage3_losses[-1]:.6f}")
-print(f"    Reduction:                     {RESULTS['summary']['loss_reduction_pct']:.1f}%")
-print(f"  Total time: {total_time:.1f}s")
+# Stage-over-stage eval improvement (meaningful because eval uses same data/loss)
+eval_reduction_s1s3 = (
+    (eval_losses["stage1"] - eval_losses["stage3"]) / max(eval_losses["stage1"], 1e-10) * 100
+)
+
+RESULTS["summary"] = {
+    "total_params": total_params,
+    "total_time_seconds": round(total_time + dt_feat, 1),
+    "device": str(DEVICE),
+    "feature_extraction_time_seconds": round(dt_feat, 1),
+    "s_t_mean": round(s_t_full.mean().item(), 6),
+    "s_t_std": round(s_t_full.std().item(), 6),
+    "eval_loss_by_stage": eval_losses,
+    "eval_sharpe_by_stage": eval_sharpes,
+    "eval_loss_reduction_s1_to_s3_pct": round(eval_reduction_s1s3, 1),
+    "stage1_train_loss": stage1_losses[-1],
+    "stage2_train_loss": stage2_losses[-1],
+    "stage3_train_loss": stage3_losses[-1] if stage3_losses else float("nan"),
+    "stage3_cdap_scale_final": {
+        "expert_bias_scale": model.cross_dim_attn.expert_bias_scale.item(),
+        "memory_gate_scale": model.cross_dim_attn.memory_gate_scale.item(),
+        "depth_weight_scale": model.cross_dim_attn.depth_weight_scale.item(),
+    },
+}
+
+print(f"  Feature extraction: {dt_feat:.1f}s  |  s_t stats: μ={s_t_full.mean():.4f}, σ={s_t_full.std():.4f}")
+print(f"  Eval metrics (same hold-out set, same MSE loss):")
+print(f"    Stage 1 (expert pre-train):   loss={eval_losses['stage1']:.6f}  sharpe={eval_sharpes['stage1']:.3f}")
+print(f"    Stage 2 (router+memory):       loss={eval_losses['stage2']:.6f}  sharpe={eval_sharpes['stage2']:.3f}")
+print(f"    Stage 3 (joint fine-tune):     loss={eval_losses['stage3']:.6f}  sharpe={eval_sharpes['stage3']:.3f}")
+print(f"    Eval loss reduction (S1→S3):  {eval_reduction_s1s3:.1f}%")
+print(f"  CDAP scales after Stage 3: "
+      f"expert_bias={model.cross_dim_attn.expert_bias_scale.item():.4f}  "
+      f"mem_gate={model.cross_dim_attn.memory_gate_scale.item():.4f}  "
+      f"depth={model.cross_dim_attn.depth_weight_scale.item():.4f}")
+print(f"  Total time: {total_time + dt_feat:.1f}s")
 print(f"  Parameters: {total_params:,}")
 
 # Save results

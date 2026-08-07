@@ -137,7 +137,7 @@ class HardeningEngine:
         self.entropy_history.append(entropy)
         if len(self.entropy_history) > 1000:
             self.entropy_history.pop(0)
-        if len(self.entropy_history) >= 100:
+        if len(self.entropy_history) >= 30:
             self.baseline_entropy = sum(self.entropy_history) / len(self.entropy_history)
 
         # === Check: does a hardened cache entry exist? ===

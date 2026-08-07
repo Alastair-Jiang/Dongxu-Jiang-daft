@@ -87,7 +87,7 @@ def main():
     # ------------------------------------------------------------------
     # 2. 特征:同一 200 维特征引擎(与 DAFT 公平对比)
     # ------------------------------------------------------------------
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_t_raw = extractor(panel)                 # (T, N, 200)
     s_t_raw = torch.nan_to_num(s_t_raw, nan=0.0, posinf=1e6, neginf=-1e6)

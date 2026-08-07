@@ -69,7 +69,7 @@ def main():
     print("Checkpoints 已加载")
 
     # 标准化(仅 train 段)
-    ext = RegimeFeatureExtractor(n_output=200)
+    ext = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_tr = ext(panel.slice_time(0, t_train_end))
     s_tr = torch.nan_to_num(s_tr, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6,1e6)

@@ -129,7 +129,7 @@ def main():
     # --------------- Step 2: Extract features ---------------
     banner("Step 2: Extract Market State Vectors s_t")
     t0 = time.time()
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_t = extractor(panel)
     dt = time.time() - t0

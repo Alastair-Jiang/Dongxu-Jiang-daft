@@ -136,7 +136,7 @@ def generate_backtest_signals(
     -------
     signals : (T-1, N) float tensor of predicted returns.
     """
-    extractor = RegimeFeatureExtractor(n_output=200)
+    extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
         s_t_raw = extractor(panel)
     s_t_raw = torch.nan_to_num(s_t_raw, nan=0.0, posinf=1e6, neginf=-1e6)
