@@ -123,9 +123,21 @@ class KDAMarketMemory(nn.Module):
         self,
         s_t: torch.Tensor,
         z_t: Optional[torch.Tensor] = None,
+        cdap_gate: Optional[torch.Tensor] = None,
         reset: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Process one timestep through the KDA market memory."""
+        """Process one timestep through the KDA market memory.
+
+        Parameters
+        ----------
+        s_t : (B, d_feature) — market state vector
+        z_t : (B, 16) or None — router latent vector for route_modulate
+        cdap_gate : (B, d_k) or None — CDAP memory gate, applied directly
+            to the forget gate alpha. When provided, the gradient flows
+            from the memory update back through the gate to CDAP's
+            memory_gate_scale, allowing the joint-space modulation to learn.
+        reset : bool — reinitialize memory matrix to zeros
+        """
         B = s_t.size(0)
         device = s_t.device
 
@@ -146,6 +158,14 @@ class KDAMarketMemory(nn.Module):
         if self.use_route_modulation and z_t is not None:
             route_mod = torch.sigmoid(self.route_modulate(z_t))   # (B, d_k)
             alpha = alpha * route_mod
+
+        # === CDAP: Memory gate modulation from joint-space ===
+        # The CDAP memory_gate captures cross-dimension interactions:
+        # routing ⊙ memory ⊙ depth → gate. This is the CDAP → Memory
+        # feedback pathway — the joint-space representation directly
+        # modulates per-channel forgetting.
+        if cdap_gate is not None:
+            alpha = alpha * cdap_gate
 
         # === Step 2: β_t (learnable learning rate) ===
         beta = self.beta_proj(s_t)   # (B, 1), β ∈ (0, 1)
