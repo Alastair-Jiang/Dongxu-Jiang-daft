@@ -31,14 +31,13 @@ class VolatilityExpert(BaseExpert):
         )
 
     def _regime_filter(self, panel) -> torch.Tensor:
-        """Select high-volatility regime samples.
+        """Select high-volatility regime timesteps: rolling vol > 80th percentile.
 
-        Filter: rolling volatility above 80th percentile.
+        High-vol periods require position-sizing discipline and tail-risk
+        hedging — this expert's competence region.
         """
-        raise NotImplementedError(
-            "Regime filter requires computed regime features. "
-            "Will be implemented after Feature Engine integration."
-        )
+        from daft.models.experts.base_expert import _compute_vol_mask
+        return _compute_vol_mask(panel, quantile=0.80)
 
     def compute_loss(
         self,

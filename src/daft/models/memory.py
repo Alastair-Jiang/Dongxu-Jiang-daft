@@ -30,26 +30,35 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class SiTU(nn.Module):
+    """Sigmoid Tanh Unit — K3 activation: σ(x) ⊙ tanh(x).
+
+    Naturally bounded in [-1, 1] with smooth gradients.
+    """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(x) * torch.tanh(x)
+
+
 class KDAMarketMemory(nn.Module):
     """KDA-style market memory with route-modulated forgetting.
 
-    Maintains a fixed-size memory matrix M ∈ R^{d_k × d_v} that is updated
-    at each timestep via a delta-rule (online gradient descent on the
-    reconstruction objective).
+    Upgraded to full K3 spec (arXiv:2510.26692):
+    - SiTU activation (replaces SiLU)
+    - Safe forget gate with A_log / dt_bias learnable parameters
+    - Output gate (low-rank sigmoid) on retrieved memory
+    - Route-modulated forgetting (CDAP connection)
+
+    Maintains a fixed-size memory matrix M ∈ R^{d_k × d_v} updated
+    at each timestep via delta-rule online gradient descent.
 
     Parameters
     ----------
-    d_k : int
-        Key dimension = number of memory slots. Default: 128.
-    d_v : int
-        Value dimension = information stored per slot. Default: 64.
-    d_feature : int
-        Input feature dimension. Default: 200.
-    bottleneck_ratio : int
-        Forget gate low-rank compression ratio (KDA FineGrainedGating).
-        Default: 4 (200 → 32 → 128 for the forget gate).
-    use_route_modulation : bool
-        Enable Router → Memory CDAP connection. Default: True.
+    d_k : int  — Key dim / number of memory slots. Default: 128.
+    d_v : int  — Value dim / stored info per slot. Default: 64.
+    d_feature : int  — Input feature dim. Default: 200.
+    bottleneck_ratio : int  — Forget gate low-rank compression. Default: 4.
+    use_route_modulation : bool  — Enable Router → Memory CDAP. Default: True.
+    safe_gate_lower_bound : float  — K3 safe gate floor. Default: 0.001.
     """
 
     def __init__(
@@ -59,19 +68,24 @@ class KDAMarketMemory(nn.Module):
         d_feature: int = 200,
         bottleneck_ratio: int = 4,
         use_route_modulation: bool = True,
+        safe_gate_lower_bound: float = 0.001,
     ):
         super().__init__()
         self.d_k = d_k
         self.d_v = d_v
         self.d_feature = d_feature
         self.use_route_modulation = use_route_modulation
+        self.lower_bound = safe_gate_lower_bound
 
         bottleneck_dim = d_k // bottleneck_ratio
 
         # === Per-channel forget gate (KDA FineGrainedGating) ===
-        # Low-rank bottleneck: d_feature → bottleneck → d_k
         self.forget_down = nn.Linear(d_feature, bottleneck_dim)
         self.forget_up = nn.Linear(bottleneck_dim, d_k)
+
+        # === K3 Safe Gate: learnable decay parameters ===
+        self.A_log = nn.Parameter(torch.randn(d_k) * 0.1)   # per-channel log decay
+        self.dt_bias = nn.Parameter(torch.zeros(d_k))        # per-channel dt bias
 
         # === Learnable per-step learning rate β_t ===
         self.beta_proj = nn.Sequential(
@@ -79,32 +93,29 @@ class KDAMarketMemory(nn.Module):
             nn.Sigmoid(),
         )
 
-        # === Query / Key / Value projections ===
+        # === Q / K / V projections ===
         self.q_proj = nn.Linear(d_feature, d_k)
         self.k_proj = nn.Linear(d_feature, d_k)
         self.v_proj = nn.Linear(d_feature, d_v)
 
+        # === Output gate (K3 spec) — low-rank sigmoid on retrieved content ===
+        out_bottleneck = max(d_v // 4, 4)
+        self.out_gate_down = nn.Linear(d_feature, out_bottleneck)
+        self.out_gate_up = nn.Linear(out_bottleneck, d_v)
+
         # === CDAP: Router → Memory modulation ===
         if use_route_modulation:
-            # z_t (latent_dim=16) → d_k forget gate modulation
             self.route_modulate = nn.Linear(16, d_k)
 
         # State matrix (created dynamically per batch)
         self.M: Optional[torch.Tensor] = None
 
     def reset_state(self, batch_size: int, device: torch.device):
-        """(Re)initialize the memory matrix to zeros.
-
-        Parameters
-        ----------
-        batch_size : int
-            Number of independent sequences in the batch.
-        device : torch.device
-        """
+        """Re-initialize the memory matrix to zeros."""
         self.M = torch.zeros(batch_size, self.d_k, self.d_v, device=device)
 
     def detach_state(self):
-        """Detach memory state from computation graph (call after backward)."""
+        """Detach memory state from computation graph."""
         if self.M is not None:
             self.M = self.M.detach()
 
@@ -114,100 +125,74 @@ class KDAMarketMemory(nn.Module):
         z_t: Optional[torch.Tensor] = None,
         reset: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Process one timestep through the KDA market memory.
-
-        Parameters
-        ----------
-        s_t : torch.Tensor, shape (B, d_feature)
-            Market state vector at current timestep.
-        z_t : torch.Tensor, shape (B, 16), optional
-            Routing latent vector. If provided and use_route_modulation=True,
-            modulates the forget gate. This is the CDAP Router → Memory link.
-        reset : bool
-            If True, reinitialize memory before processing.
-
-        Returns
-        -------
-        retrieved : torch.Tensor, shape (B, d_v)
-            Retrieved memory content for the current query.
-        M_t : torch.Tensor, shape (B, d_k, d_v)
-            Updated memory matrix state.
-        """
+        """Process one timestep through the KDA market memory."""
         B = s_t.size(0)
         device = s_t.device
 
-        # Initialize memory if needed
         if self.M is None or reset or self.M.size(0) != B:
             self.reset_state(B, device)
 
         # === Step 1: Per-channel forget gate (KDA FineGrainedGating) ===
-        alpha = self.forget_down(s_t)        # (B, bottleneck)
-        alpha = F.silu(alpha)                # SiLU activation
-        alpha = self.forget_up(alpha)        # (B, d_k)
-        alpha = torch.sigmoid(alpha)         # α ∈ (0, 1)^{d_k}
+        alpha = self.forget_down(s_t)            # (B, bottleneck)
+        alpha = SiTU()(alpha)                    # SiTU (K3 spec, was SiLU)
+        alpha = self.forget_up(alpha)            # (B, d_k)
+
+        # K3 Safe Gate:  α = lower_bound · σ(exp(A_log) · (input + dt_bias))
+        alpha = self.lower_bound * torch.sigmoid(
+            torch.exp(self.A_log) * (alpha + self.dt_bias)
+        )  # α ∈ (lower_bound, 1)^{d_k}
 
         # === CDAP: Router → Memory modulation ===
         if self.use_route_modulation and z_t is not None:
-            route_mod = torch.sigmoid(self.route_modulate(z_t))  # (B, d_k)
-            alpha = alpha * route_mod  # Element-wise modulation
+            route_mod = torch.sigmoid(self.route_modulate(z_t))   # (B, d_k)
+            alpha = alpha * route_mod
 
-        # === Step 2: Compute β_t (learnable learning rate) ===
-        beta = self.beta_proj(s_t)  # (B, 1), β ∈ (0, 1)
+        # === Step 2: β_t (learnable learning rate) ===
+        beta = self.beta_proj(s_t)   # (B, 1), β ∈ (0, 1)
 
-        # === Step 3: Query / Key / Value projections ===
-        k = self.k_proj(s_t)  # (B, d_k)
-        k = F.normalize(k, dim=-1)  # L2-normalize (KDA stability requirement)
-
-        v = self.v_proj(s_t)  # (B, d_v)
-        q = self.q_proj(s_t)  # (B, d_k)
+        # === Step 3: Q / K / V projections ===
+        k = self.k_proj(s_t)
+        k = F.normalize(k, dim=-1)    # L2-norm  (KDA stability)
+        v = self.v_proj(s_t)
+        q = self.q_proj(s_t)
 
         # === Step 4: KDA Delta-Rule Update ===
 
-        # 4a: Apply per-channel forget (diagonal decay)
-        # α ∈ (B, d_k) → broadcast to (B, d_k, d_v)
+        # 4a: Per-channel forget
         self.M = alpha.unsqueeze(-1) * self.M
 
-        # 4b: Delta correction: remove conflicting old information
-        # M_k = M · k, shape (B, d_v)
+        # 4b: Delta correction  M -= β · k ⊗ (M · k)
         M_k = torch.einsum('bkv,bk->bv', self.M, k)
-
-        # M = M - β · k ⊗ (M · k)
         self.M = self.M - beta.unsqueeze(-1) * torch.einsum(
             'bk,bv->bkv', k, M_k
         )
 
-        # 4c: KV write: add new information
-        # M = M + β · k ⊗ v
+        # 4c: KV write  M += β · k ⊗ v
         self.M = self.M + beta.unsqueeze(-1) * torch.einsum(
             'bk,bv->bkv', k, v
         )
 
-        # === Step 5: Memory retrieval ===
-        # o = M^T · q, shape (B, d_v)
+        # === Step 5: Memory retrieval  o = M^T · q ===
         retrieved = torch.einsum('bkv,bk->bv', self.M, q)
 
-        # RMSNorm on output (KDA practice)
+        # === Output gate (K3 spec): y = σ(W_up · W_down · s_t) ⊙ o ===
+        out_gate = self.out_gate_down(s_t)
+        out_gate = SiTU()(out_gate)
+        out_gate = self.out_gate_up(out_gate)
+        out_gate = torch.sigmoid(out_gate)          # (B, d_v), ∈ (0, 1)
+        retrieved = retrieved * out_gate
+
+        # RMSNorm on output
         retrieved = self._rms_norm(retrieved)
 
         return retrieved, self.M.clone()
 
     @staticmethod
     def _rms_norm(x: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-        """Root Mean Square Layer Normalization (used in KDA)."""
         rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + eps)
         return x / rms
 
     def get_memory_summary(self) -> torch.Tensor:
-        """Return a flattened summary of the current memory state.
-
-        Used by the Cross-Dimension Attention Protocol to incorporate
-        memory state into joint modulation.
-
-        Returns
-        -------
-        summary : torch.Tensor, shape (B, d_k * d_v)
-            Flattened memory matrix.
-        """
         if self.M is None:
             raise RuntimeError("Memory not initialized. Call forward() first.")
         return self.M.reshape(self.M.size(0), -1)

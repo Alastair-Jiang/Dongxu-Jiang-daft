@@ -30,14 +30,13 @@ class ReversalExpert(BaseExpert):
         )
 
     def _regime_filter(self, panel) -> torch.Tensor:
-        """Select mean-reversion regime samples using ADX proxy.
+        """Select mean-reversion regime timesteps: mean cross-sectional ADX < 20.
 
-        Filter: ADX_proxy < 20 (weak trend → oscillating / range-bound).
+        Low ADX indicates range-bound / oscillating markets where
+        mean-reversion strategies are most effective.
         """
-        raise NotImplementedError(
-            "Regime filter requires computed regime features. "
-            "Will be implemented after Feature Engine integration."
-        )
+        from daft.models.experts.base_expert import _compute_adx_mask
+        return _compute_adx_mask(panel, threshold=20.0, above=False)
 
     def compute_loss(
         self,

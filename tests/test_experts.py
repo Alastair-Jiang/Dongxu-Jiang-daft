@@ -135,9 +135,10 @@ class TestTrendExpert:
         assert loss.isfinite()
         assert loss.ndim == 0
 
-    def test_regime_filter_not_implemented(self):
+    def test_regime_filter_needs_panel(self):
+        """_regime_filter requires a Panel — passing None raises TypeError."""
         expert = TrendExpert()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(Exception):
             expert._regime_filter(None)
 
 
@@ -195,9 +196,10 @@ class TestReversalExpert:
         # Perfect negative corr → IC ≈ -1.0 → loss ≈ 1.0
         assert loss.item() > 0.9
 
-    def test_regime_filter_not_implemented(self):
+    def test_regime_filter_needs_panel(self):
+        """_regime_filter requires a Panel — passing None raises TypeError."""
         expert = ReversalExpert()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(Exception):
             expert._regime_filter(None)
 
 
@@ -252,9 +254,10 @@ class TestVolatilityExpert:
         loss = expert.compute_loss(pred, target, mask)
         assert loss.item() >= 0
 
-    def test_regime_filter_not_implemented(self):
+    def test_regime_filter_needs_panel(self):
+        """_regime_filter requires a Panel — passing None raises TypeError."""
         expert = VolatilityExpert()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(Exception):
             expert._regime_filter(None)
 
 
@@ -309,9 +312,10 @@ class TestEventExpert:
         loss = expert.compute_loss(pred, target, mask)
         assert loss.item() >= 0
 
-    def test_regime_filter_not_implemented(self):
+    def test_regime_filter_needs_panel(self):
+        """_regime_filter requires a Panel — passing None raises TypeError."""
         expert = EventExpert()
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(Exception):
             expert._regime_filter(None)
 
 

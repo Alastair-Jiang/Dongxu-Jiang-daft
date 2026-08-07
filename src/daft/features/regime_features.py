@@ -65,7 +65,9 @@ class RegimeFeatureExtractor(nn.Module):
         Uses the first feature's mask as the asset-level tradability mask,
         since all features in a Panel share the same mask shape.
         """
-        return panel.mask[:, :, 0]
+        if panel.mask.ndim == 3:
+            return panel.mask[:, :, 0]
+        return panel.mask
 
     # ════════════════════════════════════════════════════════════════════
     # Group 1: Price Dynamics (45 dims)
