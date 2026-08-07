@@ -84,10 +84,7 @@ class ExpertEnsemble(nn.Module):
         # === Step 1: Route to experts ===
         topk_probs, topk_indices, z_t, full_probs = self.router(s_t, mode=mode)
 
-        # === Step 2: Update and query memory ===
-        retrieved, _ = self.memory(s_t, z_t=z_t)
-
-        # === Step 3: Expert forward passes ===
+        # === Step 2: Expert forward passes ===
         expert_outputs = []
         expert_hiddens = []
         for i, expert in enumerate(self.experts):
@@ -99,7 +96,17 @@ class ExpertEnsemble(nn.Module):
         # Note: expert_hiddens have different dims (heterogeneous experts),
         # so we don't stack them. They're available per-expert if needed.
 
-        # === Step 4: Cross-Dimension Attention Protocol ===
+        # === Step 3: Cross-Dimension Attention Protocol (BEFORE memory) ===
+        # CDAP runs before memory so the memory_gate can be passed directly
+        # to memory.forward(), keeping the gradient path intact:
+        #   loss → memory(α·gate) → gate → CDAP → memory_gate_scale
+        # This replaces the old side-channel approach where the gate was
+        # stored for the NEXT step and detach_state() killed the gradient.
+        # Initialize M placeholder for first call (CDAP needs it before
+        # memory.forward() has run for the first time).
+        if self.memory.M is None or self.memory.M.size(0) != B:
+            self.memory.reset_state(B, device)
+
         if mode != "inference" or not use_hardening:
             # Full CDAP modulation
             memory_matrix = self.memory.M.clone()
@@ -110,18 +117,11 @@ class ExpertEnsemble(nn.Module):
                     memory_matrix=memory_matrix,
                     layer_outputs=layer_outputs,
                 )
-
-            # Apply memory gate to memory (additional forget modulation)
-            # This will take effect in the NEXT timestep's memory update
-            # (stored as a side-channel for the memory module)
-
-            # Use modulated routing weights
             final_routing = routing_mod
         else:
             # Try hardened fast path (per-sample independent decisions)
             regime_ids = self.router.get_regime_id(z_t)  # (B,) long
 
-            # Check hardening per sample — majority vote for batch decision
             fast_decisions = []
             for b in range(B):
                 fast_decisions.append(
@@ -132,7 +132,6 @@ class ExpertEnsemble(nn.Module):
             use_fast = all(fast_decisions)
 
             if use_fast:
-                # Use cached weights per sample (each may have different cached pattern)
                 cached_weights_list = []
                 for b in range(B):
                     cw = self.hardening.get_cached_weights(
@@ -142,10 +141,12 @@ class ExpertEnsemble(nn.Module):
                 final_routing = torch.stack(cached_weights_list, dim=0)  # (B, n_experts)
                 depth_weights = F.softmax(
                     torch.ones(B, 3, device=device), dim=-1
-                )  # Uniform depth weights in fast path
+                )
                 fused_layers = sum(
                     depth_weights[:, k:k+1] * layer_outputs[k] for k in range(3)
                 )
+                # Fast path: no CDAP → no memory_gate modulation
+                memory_gate = None
             else:
                 # Regime shift detected → full CDAP
                 memory_matrix = self.memory.M.clone()
@@ -157,12 +158,22 @@ class ExpertEnsemble(nn.Module):
                     )
                 final_routing = routing_mod
 
+        # === Step 4: Update and query memory (with CDAP gate, same graph) ===
+        # memory_gate is passed directly — gradients flow from α modulation
+        # back through the gate to CDAP's memory_gate_scale parameter.
+        # The retrieved memory vector contributes to the signal so that
+        # the memory pathway receives meaningful gradients.
+        retrieved, _ = self.memory(s_t, z_t=z_t, cdap_gate=memory_gate)
+
         # === Step 5: Weighted expert fusion ===
         # signal = Σ_i w_i · expert_i(s_t)
         signal = (final_routing * expert_outputs).sum(dim=-1, keepdim=True)  # (B, 1)
 
-        # === Step 6: Depth-weighted layer fusion ===
-        signal = signal + 0.1 * fused_layers.mean(dim=-1, keepdim=True)
+        # === Step 6: Depth + Memory fusion ===
+        # Both fused_layers (CDAP depth output) and retrieved (KDA memory output)
+        # contribute to the signal, ensuring both CDAP and memory pathways
+        # receive gradient signal through the loss.
+        signal = signal + 0.1 * (fused_layers + retrieved).mean(dim=-1, keepdim=True)
 
         # === Step 7: Assemble outputs ===
         regime_id = self.router.get_regime_id(z_t) if mode == "inference" else None
