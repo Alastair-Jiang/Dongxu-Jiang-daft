@@ -93,71 +93,44 @@ DAFT formalizes these intuitions as a trainable, three-way modulation protocol.
 
 ### High-Level Design
 
-```
-═══════════════════════════════════════════════════════════════════════
-                          DAFT System Architecture
-═══════════════════════════════════════════════════════════════════════
+```mermaid
+flowchart TD
+    MD["Market Data<br/>(OHLCV, min)"]
+    FE["Feature Engine<br/>• 213 base factors<br/>• Regime features<br/>• FFT spectral<br/>• s_t ∈ R²⁰⁰"]
+    MD --> FE
 
-                            ┌──────────────────┐
-                            │   Market Data     │
-                            │   (OHLCV, min)    │
-                            └────────┬──────────┘
-                                     │
-                            ┌────────▼──────────┐
-                            │  Feature Engine    │
-                            │  • 213 base factors│
-                            │  • Regime features │
-                            │  • FFT spectral    │
-                            │  • s_t ∈ R^200     │
-                            └────────┬──────────┘
-                                     │
-              ┌──────────────────────┼──────────────────────┐
-              │                      │                      │
-              ▼                      ▼                      ▼
-    ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
-    │  L0: Raw Data   │   │  L1: Base Factors│   │  L2: Composite  │
-    │  (Price/Volume)  │   │  (MA/Vol/RSI)   │   │  (Regime/Risk)  │
-    └────────┬────────┘   └────────┬────────┘   └────────┬────────┘
-             │                     │                     │
-             └─────────────────────┼─────────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-                    ▼              ▼              ▼
-    ┌───────────────────────────────────────────────────────┐
-    │              CROSS-DIMENSION ATTENTION                 │
-    │                                                       │
-    │   ┌─────────┐      ┌──────────┐      ┌────────────┐  │
-    │   │ Router  │◄────►│  Memory  │◄────►│   Depth    │  │
-    │   │(Regime) │      │  (KDA)   │      │ (AttnRes)  │  │
-    │   └────┬────┘      └────┬─────┘      └─────┬──────┘  │
-    │        │                │                   │         │
-    │        └────────────────┼───────────────────┘         │
-    │                         │                             │
-    │               Joint Latent Space                      │
-    │               (mutual modulation)                     │
-    └─────────────────────────┬─────────────────────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │  Hardening Engine  │
-                    │  Fast Path / Slow  │
-                    │  Path Router       │
-                    └─────────┬─────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │  Expert Ensemble  │
-                    │  Weighted Signal  │
-                    └─────────┬─────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │  Portfolio Optim  │
-                    │  (Markowitz)      │
-                    └─────────┬─────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │  Backtest Engine  │
-                    │  (Vectorized)     │
-                    └───────────────────┘
+    L0["L0: Raw Data<br/>(Price/Volume)"]
+    L1["L1: Base Factors<br/>(MA/Vol/RSI)"]
+    L2["L2: Composite<br/>(Regime/Risk)"]
+    FE --> L0
+    FE --> L1
+    FE --> L2
+
+    subgraph CDA["Cross-Dimension Attention"]
+        R["Router<br/>(Regime)"]
+        M["Memory<br/>(KDA)"]
+        D["Depth<br/>(AttnRes)"]
+        R <--> M
+        M <--> D
+        D <--> R
+        JLS["Joint Latent Space<br/>(mutual modulation)"]
+        R --> JLS
+        M --> JLS
+        D --> JLS
+    end
+
+    L0 --> CDA
+    L1 --> CDA
+    L2 --> CDA
+
+    HE["Hardening Engine<br/>Fast Path / Slow Path Router"]
+    CDA --> HE
+    EE["Expert Ensemble<br/>Weighted Signal"]
+    HE --> EE
+    PO["Portfolio Optim<br/>(Markowitz)"]
+    EE --> PO
+    BE["Backtest Engine<br/>(Vectorized)"]
+    PO --> BE
 ```
 
 ### Component 1: Regime Router
