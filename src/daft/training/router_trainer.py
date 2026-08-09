@@ -91,6 +91,7 @@ class RouterTrainer:
         balance_every = cfg.get("balance_every", 50)
         grad_clip_norm = cfg.get("grad_clip_norm", 1.0)
         entropy_weight = cfg.get("entropy_weight", 0.01)  # small entropy bonus
+        sparsity_weight = cfg.get("sparsity_weight", 0.05)  # per-sample sparsity
 
         # --- Freeze experts ---
         for expert in self.model.experts:
@@ -147,6 +148,7 @@ class RouterTrainer:
                 balance_every=balance_every,
                 grad_clip_norm=grad_clip_norm,
                 entropy_weight=entropy_weight,
+                sparsity_weight=sparsity_weight,
             )
 
             # ---- Validate ----
@@ -254,6 +256,7 @@ class RouterTrainer:
         balance_every: int = 50,
         grad_clip_norm: float = 1.0,
         entropy_weight: float = 0.01,
+        sparsity_weight: float = 0.05,
         return_predictions: bool = False,
     ):
         """Run one epoch, optionally training.
@@ -339,7 +342,6 @@ class RouterTrainer:
                 routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
                                     ).sum(dim=-1).mean()
                 # 总损失: 加权专家损失 - 整体熵正则(防坍缩) + 样本稀疏惩罚(防均匀)
-                sparsity_weight = cfg.get("sparsity_weight", 0.05)
                 loss = (weighted_loss
                         - entropy_weight * routing_entropy
                         + sparsity_weight * sparsity_penalty)
