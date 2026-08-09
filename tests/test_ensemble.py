@@ -207,7 +207,10 @@ class TestDeterminism:
         ensemble.eval()
         with torch.no_grad():
             out1 = ensemble(s_t, layers, mode="val")
-            ensemble.memory.reset_state(s_t.size(0), s_t.device)  # reset after stateful memory update
+            # 重置记忆状态后再跑第二次 —— KDA 记忆是有状态的,
+            # safe gate 修复后(α∈(lb,1), 记忆真正保留信息),
+            # 不重置则第二次调用基于第一次的记忆输出, 必然不同。
+            ensemble.memory.reset_state(s_t.size(0), ensemble.memory.M.device)
             out2 = ensemble(s_t, layers, mode="val")
         assert torch.allclose(out1["signal"], out2["signal"], atol=1e-6)
 

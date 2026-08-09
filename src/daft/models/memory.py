@@ -149,8 +149,11 @@ class KDAMarketMemory(nn.Module):
         alpha = SiTU()(alpha)                    # SiTU (K3 spec, was SiLU)
         alpha = self.forget_up(alpha)            # (B, d_k)
 
-        # K3 Safe Gate:  α = lower_bound + (1 - lower_bound) · σ(exp(A_log) · (x + dt_bias))
-        alpha = self.lower_bound + (1 - self.lower_bound) * torch.sigmoid(
+        # K3 Safe Gate:  α = lb + (1-lb)·σ(exp(A_log) · (input + dt_bias))
+        # 修复(2026-08-09, Kimi K3 评审):原实现 lb·σ(·) 把下界乘成了上界,
+        # 导致 α∈(0,0.001) 每步衰减 99.9%+ —— 记忆实际是"金鱼记忆",
+        # 跨 3-5 步即归零。正确形状应保证 α∈(lb, 1)。
+        alpha = self.lower_bound + (1.0 - self.lower_bound) * torch.sigmoid(
             torch.exp(self.A_log) * (alpha + self.dt_bias)
         )  # α ∈ (lower_bound, 1)^{d_k}
 

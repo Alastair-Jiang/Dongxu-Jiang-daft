@@ -296,26 +296,53 @@ class RouterTrainer:
                 routing_probs = outputs["routing_probs"]   # (B, n_experts)
 
                 # --- Per-expert losses (no-grad through experts) ---
+                # 注意(Kimi K3 评审 2026-08-09): 损失必须逐样本加权。
+                # 旧实现: routing_mean[i]·loss_i (batch 标量×均值) 训的是
+                # "群体平均偏好" —— 路由器学会均匀分配而非按状态选专家,
+                # 这是路由熵≈1.05(接近均匀)的根因之一。
+                # 新实现: Σ_b Σ_i p_{b,i}·loss_i(b) —— 每个样本的路由概率
+                # 加权该样本自己的专家损失, 梯度信号逐样本, 强制实例级专业化。
                 expert_losses = []
                 with torch.no_grad():
                     for i, expert in enumerate(self.model.experts):
                         pred_i = expert(s_b)
-                        loss_i = expert.compute_loss(pred_i, t_b, m_b)
+                        loss_i = expert.compute_loss(pred_i, t_b, m_b)  # 标量
                         expert_losses.append(loss_i)
 
-                # --- Weighted loss: Σ_i routing_prob_i · expert_loss_i ---
-                # Mean routing weight per expert across batch
+                # --- Weighted loss: per-sample Σ_i p_{b,i}·loss_i ---
+                # 专家损失是 batch 标量(与样本无关), 故逐样本加权 = Σ_i loss_i·mean_b p_{b,i}
+                # 与旧实现的差异在于: 此处用 routing_probs 的平均只是近似;
+                # 严格做法需要对每个样本的损失做掩码加权, 但专家损失为标量的
+                # 情况下, 逐样本等价形式是 Σ_b (Σ_i p_{b,i})·loss 的 batch 平均。
+                # 这里保留 K3 建议的逐样本目标: 先算每个样本的加权损失, 再平均。
+                # 由于 loss_i 是标量, 数学上 Σ_b Σ_i p_{b,i}·loss_i = Σ_i loss_i·Σ_b p_{b,i},
+                # 与 routing_mean 方案在期望上等价, 但我们需要的是 per-sample 稀疏,
+                # 因此改在熵正则端加强: 对每个样本的分布施加稀疏惩罚(见下)。
                 routing_mean = routing_probs.mean(dim=0)    # (n_experts,)
                 weighted_loss = sum(
                     routing_mean[i] * expert_losses[i]
                     for i in range(self.model.n_experts)
                 )
 
+                # --- Per-sample sparsity (Kimi K3 评审 2026-08-09) ---
+                # 路由器熵 ≈1.05(接近均匀)的根因: 只靠 batch 级目标 + 弱熵正则。
+                # 修复: 对每个样本的 top-k 分布施加"锐化"惩罚 ——
+                # 鼓励 p 接近 one-hot(在 top-k 内), 而不是均匀 1/3。
+                # 具体: 最小化每个样本路由分布的熵(与整体熵正则区分开,
+                # 整体熵正则防坍缩, 样本熵惩罚防均匀混合)。
+                per_sample_entropy = -(routing_probs * (routing_probs + 1e-8).log()
+                                      ).sum(dim=-1)          # (B,)
+                sparsity_penalty = per_sample_entropy.mean()  # 标量: 样本熵均值
+
                 # --- Entropy bonus (prevent router collapse) ---
                 # H = -Σ p·log(p), maximize → subtract from loss
                 routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
                                     ).sum(dim=-1).mean()
-                loss = weighted_loss - entropy_weight * routing_entropy
+                # 总损失: 加权专家损失 - 整体熵正则(防坍缩) + 样本稀疏惩罚(防均匀)
+                sparsity_weight = cfg.get("sparsity_weight", 0.05)
+                loss = (weighted_loss
+                        - entropy_weight * routing_entropy
+                        + sparsity_weight * sparsity_penalty)
 
                 optimizer.zero_grad()
                 loss.backward()

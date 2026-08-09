@@ -69,6 +69,14 @@ class ExpertEnsemble(nn.Module):
         use_hardening : bool
             Enable hardened fast-path lookup.
 
+        Notes
+        -----
+        AHM 决策(2026-08-09, Kimi K3 评审): 默认禁用且不推荐启用。
+        理由: (1) 推理优化不应先于信号验证 —— 未验证的策略没有"加速"
+        的需求; (2) fast path 绕过 CDAP, 与 CDAP 的调制增益自相矛盾;
+        (3) 缓存的路由快照在市场漂移后过时。保留实现供研究参考,
+        但所有训练/评估路径均不启用。
+
         Returns
         -------
         outputs : dict
