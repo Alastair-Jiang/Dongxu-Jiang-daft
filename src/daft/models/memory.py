@@ -149,8 +149,8 @@ class KDAMarketMemory(nn.Module):
         alpha = SiTU()(alpha)                    # SiTU (K3 spec, was SiLU)
         alpha = self.forget_up(alpha)            # (B, d_k)
 
-        # K3 Safe Gate:  α = lower_bound · σ(exp(A_log) · (input + dt_bias))
-        alpha = self.lower_bound * torch.sigmoid(
+        # K3 Safe Gate:  α = lower_bound + (1 - lower_bound) · σ(exp(A_log) · (x + dt_bias))
+        alpha = self.lower_bound + (1 - self.lower_bound) * torch.sigmoid(
             torch.exp(self.A_log) * (alpha + self.dt_bias)
         )  # α ∈ (lower_bound, 1)^{d_k}
 
