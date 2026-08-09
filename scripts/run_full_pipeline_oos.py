@@ -67,13 +67,13 @@ def build_experts():
 
 
 def build_ensemble(experts, cdap_strength=0.1):
-    router = RegimeRouter(input_dim=200, latent_dim=16, n_experts=8, top_k=3,
+    router = RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3,
                           temperature=1.0, noisy_gating_std=0.1)
     memory = KDAMarketMemory(d_k=128, d_v=64, d_feature=200,
                              bottleneck_ratio=4, use_route_modulation=True)
-    cdap = CrossDimensionAttention(n_experts=8, d_k=128, d_v=64, n_layers=3,
+    cdap = CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3,
                                    joint_dim=64, modulation_strength=cdap_strength)
-    hardening = HardeningEngine(n_regimes=8, n_experts=8)
+    hardening = HardeningEngine(n_regimes=8, n_experts=10)
     return ExpertEnsemble(experts, router, memory, cdap, hardening)
 
 
