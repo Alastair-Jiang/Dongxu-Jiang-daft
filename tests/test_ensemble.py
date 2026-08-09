@@ -207,6 +207,7 @@ class TestDeterminism:
         ensemble.eval()
         with torch.no_grad():
             out1 = ensemble(s_t, layers, mode="val")
+            ensemble.memory.reset_state(s_t.size(0), s_t.device)  # reset after stateful memory update
             out2 = ensemble(s_t, layers, mode="val")
         assert torch.allclose(out1["signal"], out2["signal"], atol=1e-6)
 
