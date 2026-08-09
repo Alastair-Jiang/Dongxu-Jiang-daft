@@ -59,6 +59,7 @@ class Stage1ExpertTrainer:
         2: "reversal",   3: "reversal",
         4: "volatility", 5: "volatility",
         6: "event",      7: "event",
+        8: "event",      9: "event",           # MomentumExperts, train on all data like event
     }
 
     def __init__(
