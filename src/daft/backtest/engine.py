@@ -29,6 +29,8 @@ class BacktestEngine:
         - long_only : bool              (default True)
         - annualization : int           (default 252)
         - rebalance_freq : int          (default 1, rebalance every N bars)
+        - signal_smoothing : float      (default 0.0, EMA decay in [0,1);
+                                        0 = no smoothing, 0.5 = strong)
     """
 
     def __init__(self, config: Optional[dict] = None):
@@ -45,6 +47,10 @@ class BacktestEngine:
         # Other
         self.annualization = self.config.get("annualization", 252)
         self.rebalance_freq = self.config.get("rebalance_freq", 1)
+        # 信号平滑 (Kimi K3 评审 2026-08-09): DAFT 样本外输给 Ridge 的
+        # 直接原因是换手 1.7%/bar vs 0.03% —— 信号抖动在稳定交手续费。
+        # EMA 平滑信号可降换手; 0 = 不启用 (保持原行为)。
+        self.signal_smoothing = self.config.get("signal_smoothing", 0.0)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -84,6 +90,17 @@ class BacktestEngine:
         if mask is None:
             mask = torch.ones(T, N, dtype=torch.bool, device=signals.device)
         device = signals.device
+
+        # --- Optional EMA signal smoothing (Kimi K3 评审 2026-08-09) ---
+        # 降换手: 平滑后的信号 s'_t = (1-λ)·s_t + λ·s'_{t-1}, λ=signal_smoothing
+        # 因果(只用过去), 不引入 look-ahead。λ=0 时完全等价于原信号。
+        if self.signal_smoothing > 0:
+            lam = min(max(self.signal_smoothing, 0.0), 0.99)
+            smoothed = torch.zeros_like(signals)
+            smoothed[0] = signals[0]
+            for t in range(1, T):
+                smoothed[t] = (1 - lam) * signals[t] + lam * smoothed[t - 1]
+            signals = smoothed
 
         # --- Daily log-returns ---
         log_p = torch.log(prices.clamp(min=1e-8))
