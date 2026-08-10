@@ -275,6 +275,13 @@ class JointTrainer:
 
                 loss = mse + 0.1 * expert_reg
 
+                # CDAP residual gate L2 penalty (Layer 3).
+                # Only active when cross_dim_attn.residual_gate=True.
+                gate_dev_loss = self.model.cross_dim_attn.get_gate_deviation_loss()
+                if gate_dev_loss is not None:
+                    gate_reg_weight = self.config.get("gate_reg_weight", 0.001)
+                    loss = loss + gate_reg_weight * gate_dev_loss
+
                 routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
                                     ).sum(dim=-1).mean()
 

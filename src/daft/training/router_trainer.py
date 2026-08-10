@@ -344,6 +344,13 @@ class RouterTrainer:
                         - entropy_weight * routing_entropy
                         + sparsity_weight * sparsity_penalty)
 
+                # CDAP residual gate L2 penalty (Layer 3).
+                # Only active when cross_dim_attn.residual_gate=True.
+                gate_dev_loss = self.model.cross_dim_attn.get_gate_deviation_loss()
+                if gate_dev_loss is not None:
+                    gate_reg_weight = self.config.get("gate_reg_weight", 0.001)
+                    loss = loss + gate_reg_weight * gate_dev_loss
+
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(

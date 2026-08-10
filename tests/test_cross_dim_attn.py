@@ -236,15 +236,15 @@ class TestGradientFlow:
         no_grad_params = []
         for name, p in c.named_parameters():
             if p.requires_grad and p.grad is None:
+                # memory_gate_decay is only used when residual_gate=True;
+                # it is expected to have no gradient in standard mode.
+                if name == "memory_gate_decay" and not c.residual_gate:
+                    continue
                 no_grad_params.append(name)
 
         assert len(no_grad_params) == 0, (
             f"Params with no gradient: {no_grad_params}"
         )
-        # Note: some params may have zero-sum gradients due to the
-        # element-wise product in joint space (e*m*d) creating sparse
-        # gradient paths through zero-initialized scales. That's expected
-        # at initialization and doesn't indicate a bug.
 
 
 # ── Joint space properties ────────────────────────────────────────────
@@ -325,4 +325,192 @@ class TestFusedLayers:
         assert sim_L0 > sim_L2, (
             f"Fused should be more aligned with dominant L0 "
             f"(sim_L0={sim_L0:.3f}, sim_L2={sim_L2:.3f})"
+        )
+
+
+# ── Residual Gate ──────────────────────────────────────────────────────
+
+class TestResidualGate:
+    """Tests for opt-in residual memory gate (3-layer defense)."""
+
+    def test_default_is_backward_compatible(self):
+        """Default residual_gate=False preserves original behavior."""
+        c = CrossDimensionAttention()
+        assert c.residual_gate is False
+        # memory_gate_decay exists but doesn't affect standard mode
+        assert c.memory_gate_decay is not None
+
+    def test_residual_gate_defaults_to_one(self):
+        """With residual_gate=True, gate defaults to ~1.0 (identity)
+        instead of ~0.5."""
+        c = CrossDimensionAttention(residual_gate=True)
+        routing, memory, layers = _make_inputs(8)
+        _, gate, _, _ = c(routing, memory, layers)
+        # At init, raw ≈ 0 → 2·σ(0) = 1.0
+        assert torch.allclose(gate, torch.ones_like(gate), atol=0.05), (
+            f"Residual gate should default to ~1.0, got mean={gate.mean():.4f}"
+        )
+
+    def test_standard_gate_defaults_to_half(self):
+        """Standard (residual_gate=False) gate defaults to ~0.5."""
+        c = CrossDimensionAttention(residual_gate=False)
+        routing, memory, layers = _make_inputs(8)
+        _, gate, _, _ = c(routing, memory, layers)
+        # At init, raw ≈ 0 → σ(0) = 0.5
+        assert torch.allclose(gate, 0.5 * torch.ones_like(gate), atol=0.05), (
+            f"Standard gate should default to ~0.5, got mean={gate.mean():.4f}"
+        )
+
+    def test_residual_gate_range(self):
+        """Residual gate ∈ (0, 2) due to 2×sigmoid."""
+        c = CrossDimensionAttention(residual_gate=True)
+        routing, memory, layers = _make_inputs(32)
+        _, gate, _, _ = c(routing, memory, layers)
+        assert (gate > 0).all(), "Residual gate should be > 0"
+        assert (gate < 2).all(), "Residual gate should be < 2"
+
+    def test_standard_gate_range(self):
+        """Standard gate ∈ (0, 1)."""
+        c = CrossDimensionAttention(residual_gate=False)
+        routing, memory, layers = _make_inputs(32)
+        _, gate, _, _ = c(routing, memory, layers)
+        assert (gate > 0).all(), "Standard gate should be > 0"
+        assert (gate < 1).all(), "Standard gate should be < 1"
+
+    def test_runtime_toggle(self):
+        """residual_gate can be toggled at runtime."""
+        c = CrossDimensionAttention(residual_gate=False)
+        routing, memory, layers = _make_inputs(8)
+
+        # Standard mode
+        _, gate_std, _, _ = c(routing, memory, layers)
+        assert gate_std.max() <= 1.0
+
+        # Toggle to residual mode
+        c.residual_gate = True
+        _, gate_res, _, _ = c(routing, memory, layers)
+        assert gate_res.max() > 1.0 or torch.allclose(gate_res, torch.ones_like(gate_res), atol=0.1)
+
+        # Toggle back
+        c.residual_gate = False
+        _, gate_std2, _, _ = c(routing, memory, layers)
+        assert gate_std2.max() <= 1.0
+
+    def test_output_shapes_unchanged(self):
+        """Residual gate doesn't change output shapes."""
+        c_std = CrossDimensionAttention(residual_gate=False)
+        c_res = CrossDimensionAttention(residual_gate=True)
+        c_res.load_state_dict(c_std.state_dict())
+
+        routing, memory, layers = _make_inputs(8)
+        out_std = c_std(routing, memory, layers)
+        out_res = c_res(routing, memory, layers)
+
+        for i in range(4):
+            assert out_std[i].shape == out_res[i].shape, (
+                f"Output {i} shape mismatch: {out_std[i].shape} vs {out_res[i].shape}"
+            )
+
+    def test_gate_differs_when_residual_enabled(self):
+        """With identical weights, residual vs standard produce different gates."""
+        c_std = CrossDimensionAttention(residual_gate=False)
+        c_res = CrossDimensionAttention(residual_gate=True)
+        c_res.load_state_dict(c_std.state_dict())
+
+        routing, memory, layers = _make_inputs(32)
+        _, gate_std, _, _ = c_std(routing, memory, layers)
+        _, gate_res, _, _ = c_res(routing, memory, layers)
+
+        # Gates should differ (2× shifts the center)
+        assert not torch.allclose(gate_std, gate_res, atol=1e-3), (
+            "Residual and standard gates should differ"
+        )
+
+    def test_all_params_receive_gradients_with_residual(self):
+        """All params (incl. memory_gate_decay) get gradients with residual_gate."""
+        c = CrossDimensionAttention(residual_gate=True)
+        routing, memory, layers = _make_inputs(8)
+        routing_mod, mem_gate, depth_w, fused = c(routing, memory, layers)
+        loss = (
+            routing_mod.sum() + mem_gate.sum() +
+            depth_w.sum() + fused.sum()
+        )
+        loss.backward()
+
+        no_grad_params = []
+        for name, p in c.named_parameters():
+            if p.requires_grad and p.grad is None:
+                no_grad_params.append(name)
+
+        assert len(no_grad_params) == 0, (
+            f"Params with no gradient: {no_grad_params}"
+        )
+
+    def test_memory_gate_decay_trainable(self):
+        """memory_gate_decay is a trainable parameter."""
+        c = CrossDimensionAttention(residual_gate=True)
+        assert c.memory_gate_decay.requires_grad
+        assert c.memory_gate_decay.item() == pytest.approx(0.0, abs=1e-4)
+
+    def test_decay_effect_on_gate(self):
+        """Higher decay compresses enhancement direction more aggressively."""
+        c = CrossDimensionAttention(residual_gate=True)
+
+        # Manually create a strong positive raw signal
+        routing, memory, layers = _make_inputs(8)
+        with torch.no_grad():
+            # Artificially boost the scale so raw signal is large
+            c.memory_gate_scale.data = torch.tensor([2.0])
+
+        # With decay=0 (no compression)
+        c.memory_gate_decay.data = torch.tensor([0.0])
+        _, gate_no_decay, _, _ = c(routing, memory, layers)
+
+        # With decay≈1 (max compression on enhancement)
+        c.memory_gate_decay.data = torch.tensor([3.0])  # tanh(3) ≈ 0.995
+        _, gate_decay, _, _ = c(routing, memory, layers)
+
+        # Decay should reduce gate values for the enhancement direction
+        # (positive raw) but allow suppression (negative raw) freely.
+        # Since memory_gate_scale > 0, more pos raw → more gate, but decay shrinks it.
+        # We verify decay changed gate values.
+        assert not torch.allclose(gate_no_decay, gate_decay, atol=1e-3), (
+            "memory_gate_decay should affect gate values"
+        )
+
+    def test_gate_deviation_loss_none_when_standard(self):
+        """get_gate_deviation_loss() returns None for standard gate."""
+        c = CrossDimensionAttention(residual_gate=False)
+        routing, memory, layers = _make_inputs(8)
+        c(routing, memory, layers)
+        assert c.get_gate_deviation_loss() is None
+
+    def test_gate_deviation_loss_not_none_when_residual(self):
+        """get_gate_deviation_loss() returns valid loss for residual gate."""
+        c = CrossDimensionAttention(residual_gate=True)
+        routing, memory, layers = _make_inputs(8)
+        c(routing, memory, layers)
+        dev_loss = c.get_gate_deviation_loss()
+        assert dev_loss is not None
+        # At init, gate ≈ 1.0 → deviation ≈ 0
+        assert dev_loss.item() == pytest.approx(0.0, abs=0.01)
+
+    def test_gate_deviation_loss_grows_with_deviation(self):
+        """Deviation loss increases as gate moves away from 1.0."""
+        c = CrossDimensionAttention(residual_gate=True)
+        routing, memory, layers = _make_inputs(8)
+
+        # Force gate away from 1.0 by activating scale
+        c.memory_gate_scale.data = torch.tensor([2.0])
+        c(routing, memory, layers)
+        dev_loss_high = c.get_gate_deviation_loss().item()
+
+        # Reset and use zero scale (gate ≈ 1.0)
+        c.memory_gate_scale.data = torch.tensor([0.0])
+        c(routing, memory, layers)
+        dev_loss_low = c.get_gate_deviation_loss().item()
+
+        assert dev_loss_low < dev_loss_high, (
+            f"Deviation loss with scale=0 ({dev_loss_low:.6f}) should be "
+            f"less than with scale=2 ({dev_loss_high:.6f})"
         )
