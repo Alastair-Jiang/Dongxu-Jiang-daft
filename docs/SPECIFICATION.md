@@ -6,6 +6,27 @@
 
 ---
 
+## 2026-08-16 勘误(工程修复批次)
+
+本说明书 v1.0 与早期实现存在多处出入, 2026-08-16 修复后以下为准:
+
+1. **通道契约**: 数据源产出 `[open, high, low, close, volume]`; 特征引擎需要
+   `[close, log_return, volume, volume_ratio, volatility_20]`, 转换点在
+   `src/daft/features/base_features.py::ensure_base_panel`(所有特征引擎入口强制)。
+2. **因子数量**: 手工因子注册表为 **35 个**(非 213); legacy 因子与 FFT 特征
+   **未接入**任何训练/评估管线, 200 维 s_t 全部由 RegimeFeatureExtractor 从
+   基础特征派生。
+3. **n_experts = 10**(5 类 × 2 实例), 全链路统一; 专家池为稠密软门控,
+   top-k 稀疏目前未真正落实。
+4. **CDAP 路由修正**在 **logit 空间**: `p' = softmax(log p + δ·W·j)`。
+5. **IC 对齐统一 k→k+1**(signal[t] 预测 p[t+1]−p[t]); val-IC 为逐时步截面
+   rank IC; 回测换手率为真实仓位换手; MaxDD 为净值百分比回撤。
+6. **AHM 默认禁用**(研究性实现); configs/*.yaml 为参考死配置, 实际配置在
+   各脚本 DEFAULT_CONFIG 字典中。
+7. 模型参数: 10 专家核心 ≈31.5 万, 含 layer_proj ≈41.7 万(非 "<200K")。
+
+---
+
 ## 目录
 
 1. [项目概览](#1-项目概览)
