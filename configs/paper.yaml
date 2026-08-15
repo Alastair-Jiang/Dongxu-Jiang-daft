@@ -1,5 +1,6 @@
 # DAFT Full Experiment Configuration
 # Real data, full-scale training — for reproduction of paper results
+# ⚠️ 2026-08-16: 本 yaml 目前未被任何脚本加载(死配置), 保留作参考。
 # Usage: make paper CONFIG=configs/paper.yaml
 
 experiment:
@@ -26,7 +27,7 @@ data:
     min_trading_days_per_year: 200
 
 model:
-  n_experts: 8
+  n_experts: 10
   top_k: 3
   experts:
     trend:
@@ -66,7 +67,7 @@ model:
     threshold: 200
     min_confidence: 0.95
     entropy_multiplier: 2.0
-    n_regimes_tracked: 8
+    n_regimes_tracked: 10
 
 training:
   stage1:

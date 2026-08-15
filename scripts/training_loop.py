@@ -33,7 +33,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from daft.data.loaders import DataLoader
 from daft.backtest.engine import BacktestEngine
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert
+from daft.models.experts import (
+    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
+)
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
 from daft.models.cross_dim_attn import CrossDimensionAttention
@@ -251,25 +253,27 @@ print(f"  s_t stats: mean={s_t_full.mean():.4f}  std={s_t_full.std():.4f}  "
       f"min={s_t_full.min():.4f}  max={s_t_full.max():.4f}")
 print(f"  Feature extraction time: {dt_feat:.1f}s")
 print(f"  Routing entropy (before training): "
-      f"{-(torch.ones(8)/8 * (torch.ones(8)/8 + 1e-8).log()).sum():.3f} "
+      f"{-(torch.ones(10)/10 * (torch.ones(10)/10 + 1e-8).log()).sum():.3f} "
       f"(uniform routing = maximum entropy)")
 
 # Build model
 experts_full = nn.ModuleList([
     TrendExpert(input_dim=200, hidden_dim=64),
-    ReversalExpert(input_dim=200, hidden_dim=64),
-    VolatilityExpert(input_dim=200, hidden_dim=48),
-    EventExpert(input_dim=200, hidden_dim=48),
     TrendExpert(input_dim=200, hidden_dim=64),
     ReversalExpert(input_dim=200, hidden_dim=64),
+    ReversalExpert(input_dim=200, hidden_dim=64),
+    VolatilityExpert(input_dim=200, hidden_dim=48),
     VolatilityExpert(input_dim=200, hidden_dim=48),
     EventExpert(input_dim=200, hidden_dim=48),
+    EventExpert(input_dim=200, hidden_dim=48),
+    MomentumExpert(input_dim=200, hidden_dim=64),
+    MomentumExpert(input_dim=200, hidden_dim=64),
 ])
 
-router_full = RegimeRouter(input_dim=200, latent_dim=16, n_experts=8, top_k=3)
+router_full = RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3)
 memory_full = KDAMarketMemory(d_k=128, d_v=64, d_feature=200, use_route_modulation=True)
-cdap_full = CrossDimensionAttention(n_experts=8, d_k=128, d_v=64, n_layers=3, joint_dim=64)
-hardening_full = HardeningEngine(n_regimes=8, n_experts=8, threshold=30)
+cdap_full = CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3, joint_dim=64)
+hardening_full = HardeningEngine(n_regimes=10, n_experts=10, threshold=30)
 
 model = ExpertEnsemble(
     experts=experts_full, router=router_full,
@@ -524,7 +528,7 @@ torch.save({
     "model_state_dict": model.state_dict(),
     "results": RESULTS,
     "config": {
-        "n_experts": 8, "d_k": 128, "d_v": 64,
+        "n_experts": 10, "d_k": 128, "d_v": 64,
         "n_layers": 3, "joint_dim": 64, "top_k": 3,
     }
 }, ckpt_path)

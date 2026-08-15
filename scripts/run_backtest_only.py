@@ -29,11 +29,12 @@ experts = nn.ModuleList([
 ])
 model = ExpertEnsemble(
     experts,
-    RegimeRouter(input_dim=200, latent_dim=16, n_experts=8, top_k=3, temperature=0.1, noisy_gating_std=0.0),
+    RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3, temperature=0.1, noisy_gating_std=0.0),
     KDAMarketMemory(d_k=128, d_v=64, d_feature=200, bottleneck_ratio=4, use_route_modulation=True),
-    CrossDimensionAttention(n_experts=8, d_k=128, d_v=64, n_layers=3, joint_dim=64, modulation_strength=1.0),
-    HardeningEngine(n_regimes=8, n_experts=8),
+    CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3, joint_dim=64, modulation_strength=1.0),
+    HardeningEngine(n_regimes=10, n_experts=10),
 )
+assert len(experts) == model.router.n_experts == model.cross_dim_attn.n_experts
 layer_proj = nn.ModuleDict({
     "l0": nn.Sequential(nn.Linear(200, 128), nn.SiLU(), nn.Linear(128, 64), nn.LayerNorm(64)),
     "l1": nn.Sequential(nn.Linear(200, 128), nn.SiLU(), nn.Linear(128, 64), nn.LayerNorm(64)),

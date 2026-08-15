@@ -1,7 +1,7 @@
 """DAFT Stage 1 — Independent Expert Training (end-to-end).
 
 Generates synthetic data → extracts 200-dim market state s_t → trains
-8 experts on their regime-specific subsets → outputs loss curves and
+10 experts on their regime-specific subsets → outputs loss curves and
 checkpoints.
 
 This is the first concrete milestone: data → features → trained experts.
@@ -71,7 +71,7 @@ def banner(msg: str):
 
 
 def build_experts() -> nn.ModuleList:
-    """Create 8 experts: 2 per strategy type."""
+    """Create 10 experts: 2 per strategy type."""
     return nn.ModuleList([
         TrendExpert(input_dim=200, hidden_dim=64),
         TrendExpert(input_dim=200, hidden_dim=64),
@@ -249,7 +249,7 @@ def main():
 
     trained = len([r for r in summary_records if r["epochs_trained"] > 0])
     improved = len([r for r in summary_records if r["improvement_pct"] > 0])
-    print(f"\n  {trained}/8 experts trained, {improved}/8 improved")
+    print(f"\n  {trained}/10 experts trained, {improved}/10 improved")
     print(f"  Outputs     : {OUTPUT_DIR}")
     print(f"  Checkpoints : {CHECKPOINT_DIR}")
     print(f"\n  Next step: python scripts/run_stage2.py  (router + memory training)")
