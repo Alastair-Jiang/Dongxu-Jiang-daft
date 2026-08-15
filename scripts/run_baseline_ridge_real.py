@@ -25,6 +25,7 @@ from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -82,20 +83,7 @@ def main():
     n_train = int(T_m1 * args.train_frac)
     print(f"    时间切分: train {n_train} 步 / test {T_m1 - n_train} 步 (样本外)")
 
-    X_all = s_aligned.reshape(T_m1 * N, 200).float()
-    y_all = targets.reshape(T_m1 * N).float()
-    m_all = mask_aligned.reshape(T_m1 * N).bool()
-
-    # 只保留可交易样本
-    X_all, y_all, m_all = X_all[m_all], y_all[m_all], m_all[m_all]
-
-    train_mask = torch.arange(T_m1 * N) < n_train * N
-    # 因为已经压缩过,需要按原时间索引重建训练/测试掩码
-    # 更稳妥:直接在未压缩前做切分
-    # (上面压缩会打乱 train/test 边界,重新来)
-    print("    [重新切分:按时间索引压缩]")
-
-    # 正确做法:逐段压缩
+    # 逐段压缩(按时间边界, 不做跨段混排)
     X_tr_all = s_aligned[:n_train].reshape(-1, 200).float()
     y_tr_all = targets[:n_train].reshape(-1).float()
     m_tr_all = mask_aligned[:n_train].reshape(-1).bool()
@@ -149,7 +137,9 @@ def main():
     print(f"    Hit rate    : {hit:.3f}")
 
     # ---------- 7. 回测 ----------
-    signals_padded = torch.cat([torch.zeros(1, N), pred_2d.nan_to_num(0.0)], dim=0)
+    # 对齐 k→k+1 (2026-08-16 修复): pred_2d[t] 预测 p[n_train+t+1]-p[n_train+t],
+    # 因此 positions[t] 必须取 pred_2d[t](旧实现 prepend 一行 0 导致信号晚用一天)。
+    signals_padded = torch.cat([pred_2d.nan_to_num(0.0), torch.zeros(1, N)], dim=0)
     prices_test = panel.values[n_train:, :, 3]
     mask_test = panel.mask[n_train:]
     engine = BacktestEngine({
@@ -166,6 +156,7 @@ def main():
     # ---------- 8. 保存 ----------
     report = {
         "baseline": "ridge_regression",
+        "alignment": "k→k+1 (2026-08-16 统一; 与 DAFT-OOS 同口径)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,
             "start": args.start, "end": args.end,
@@ -173,6 +164,9 @@ def main():
             "T": T, "tradable_coverage": round(n_tradable, 4),
         },
         "config": {"lambda": args.lam, "train_frac": args.train_frac, "features": 200, "params": 200},
+        "config_hash": config_hash({"lambda": args.lam, "train_frac": args.train_frac}),
+        "note": ("与 DAFT-OOS 同口径对比时使用 --train-frac 0.6 "
+                 "(DAFT 训练段=60%+val 20%; 本脚本默认 80% 无 val)"),
         "out_of_sample": {
             "train_samples": int(X_train.size(0)), "test_samples": int(X_test.size(0)),
             "ic_mean": ic_stats["ic_mean"], "ic_std": ic_stats["ic_std"],
@@ -182,7 +176,9 @@ def main():
         "backtest": bt,
         "time_seconds": round(time.time() - t0, 1),
     }
-    out_path = OUTPUT_DIR / "baseline_ridge_real_report.json"
+    # 唯一产物名 (2026-08-16): 不再覆盖历史报告
+    out_path = next_exp_path(OUTPUT_DIR, "ridge-real")
+    report["experiment_id"] = out_path.stem
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\n    报告 → {out_path}")

@@ -1,10 +1,17 @@
-"""EXP-20260809-02: 信号平滑对比 — DAFT OOS checkpoint 复用 + EMA 平滑扫描。
+"""EXP-20260809-02(重写): 信号平滑对比 — DAFT OOS checkpoint 复用 + EMA 平滑扫描。
 
 目的: 验证信号 EMA 平滑能否压低换手、改善净 Sharpe(Kimi K3 评审建议)。
 
-用法: python scripts/run_smoothing_ablation.py [--stocks 30] [--lambdas 0,0.3,0.5,0.7]
+2026-08-16 重写要点:
+  1. 对齐统一 k→k+1: signals[t] 预测 p[t+1]-p[t](与 run_full_pipeline_oos 一致);
+  2. λ 在 **val 段**选择(净 Sharpe 最优), test 段仅用于报告——修复
+     "λ 在 test 上调参"的样本外污染;
+  3. 每个 λ 的 IC 用平滑后的信号计算(旧版各 λ 的 IC 恒同值);
+  4. 产物用唯一文件名(EXP-YYYYMMDD-NN-*.json), 不再覆盖历史报告。
 
-前置: checkpoints/oos/ 必须存在(EXP-20260809-01 产物)
+用法: python scripts/run_smoothing_ablation.py [--stocks 30] [--lambdas 0,0.3,0.5,0.7]
+前置: checkpoints/oos/ 必须存在(EXP-20260809-01 产物; 若不存在请先跑
+      python scripts/run_full_pipeline_oos.py)
 """
 from __future__ import annotations
 import argparse, json, sys, time
@@ -25,6 +32,7 @@ from daft.models.ensemble import ExpertEnsemble
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -50,6 +58,38 @@ def build_model():
     return model, layer_proj
 
 
+def ema_smooth(signals: torch.Tensor, lam: float) -> torch.Tensor:
+    """因果 EMA 平滑: s'_t = (1-λ)·s_t + λ·s'_{t-1}(只用过去, 无 look-ahead)。"""
+    if lam <= 0:
+        return signals
+    smoothed = torch.zeros_like(signals)
+    smoothed[0] = signals[0]
+    for t in range(1, signals.shape[0]):
+        smoothed[t] = (1 - lam) * signals[t] + lam * smoothed[t - 1]
+    return smoothed
+
+
+def evaluate(engine_cfg: dict, signals_seg: torch.Tensor, prices_seg: torch.Tensor,
+             mask_seg: torch.Tensor, lam: float):
+    """对一个信号段做平滑+回测+IC, 返回指标字典。"""
+    smoothed = ema_smooth(signals_seg, lam)
+    engine = BacktestEngine(engine_cfg)  # signal_smoothing 已在脚本内应用
+    bt = engine.run(smoothed, prices_seg, mask=mask_seg)
+
+    log_pt = torch.log(prices_seg.clamp(min=1e-8))
+    returns = log_pt[1:] - log_pt[:-1]
+    ic_series = rank_info_coefficient(smoothed[:-1], returns, mask_seg[1:],
+                                      per_timestep=True)
+    ic = ic_summary(ic_series)
+    return {
+        "sharpe": bt["sharpe_ratio"],
+        "annual_return": bt["annual_return"],
+        "max_drawdown": bt["max_drawdown"],
+        "turnover": bt["turnover"],
+        "ic": ic["ic_mean"], "ic_t": ic["ic_t_stat"],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stocks", type=int, default=30)
@@ -60,16 +100,22 @@ def main():
     lambdas = [float(x) for x in args.lambdas.split(",")]
 
     t0 = time.time()
-    print("=== EXP-20260809-02: 信号平滑对比 ===")
+    print("=== EXP-20260809-02(v2): 信号平滑对比 (λ 在 val 选) ===")
 
     panel = BaostockAdapter({"start_date":args.start,"end_date":args.end,
                              "frequency":"d","n_stocks":args.stocks,"adjust":"2"}).load()
     T, N, F = panel.shape
     t_train_end, t_val_end = int(T*0.6), int(T*0.8)
-    print(f"Panel: (T={T}, N={N})")
+    print(f"Panel: (T={T}, N={N})  train:[0,{t_train_end}) val:[{t_train_end},{t_val_end}) test:[{t_val_end},{T})")
 
     model, layer_proj = build_model()
-    JointTrainer.load_checkpoints(model, layer_proj, str(PROJECT_ROOT/"checkpoints"/"oos"))
+    ckpt_dir = PROJECT_ROOT/"checkpoints"/"oos"
+    if not ckpt_dir.exists():
+        raise FileNotFoundError(
+            f"{ckpt_dir} 不存在 — 先运行 scripts/run_full_pipeline_oos.py "
+            "(EXP-20260809-01) 生成 checkpoint。"
+        )
+    JointTrainer.load_checkpoints(model, layer_proj, str(ckpt_dir))
     model.eval(); layer_proj.eval()
     print("Checkpoints 已加载 (EXP-20260809-01 产物)")
 
@@ -102,44 +148,48 @@ def main():
             model.memory.detach_state()
     print(f"信号: {signals.shape}")
 
-    # test 段切片
-    signals_test = signals[t_val_end-1:]
+    # ── 段切片(对齐 k→k+1, 末尾补哑元行供 engine 的 signals[:-1] 丢弃) ──
+    def seg(signals_full, t_start, t_end):  # [t_start, t_end) 天的信号 + 哑元
+        return torch.cat([signals_full[t_start:t_end], torch.zeros(1, N)], dim=0)
+
+    signals_val = seg(signals, t_train_end, t_val_end)
+    prices_val = panel.values[t_train_end:t_val_end, :, 3]
+    mask_val = panel.mask[t_train_end:t_val_end]
+
+    signals_test = seg(signals, t_val_end, T - 1)
     prices_test = panel.values[t_val_end:, :, 3]
     mask_test = panel.mask[t_val_end:]
 
-    # 每个 λ 跑一次回测
-    results = {}
+    engine_cfg = {
+        "transaction_cost_bps": 5.0, "slippage_bps": 1.0,
+        "top_quantile": 0.2, "long_only": False,
+    }
+
+    # 每个 λ 先跑 val(选参), 再跑 test(只报告)
+    val_results, test_results = {}, {}
     for lam in lambdas:
-        engine = BacktestEngine({
-            "transaction_cost_bps":5.0, "slippage_bps":1.0,
-            "top_quantile":0.2, "long_only":False,
-            "signal_smoothing": lam,
-        })
-        bt = engine.run(signals_test, prices_test, mask=mask_test)
+        val_results[lam] = evaluate(engine_cfg, signals_val, prices_val, mask_val, lam)
+        test_results[lam] = evaluate(engine_cfg, signals_test, prices_test, mask_test, lam)
+        vr, tr = val_results[lam], test_results[lam]
+        print(f"\n  λ={lam}: VAL  Sharpe={vr['sharpe']:+.4f} Turnover={vr['turnover']:.4f} IC={vr['ic']:+.4f}")
+        print(f"         TEST Sharpe={tr['sharpe']:+.4f} Turnover={tr['turnover']:.4f} IC={tr['ic']:+.4f} t={tr['ic_t']:+.2f}")
 
-        log_pt = torch.log(prices_test.clamp(min=1e-8))
-        returns_test = log_pt[1:] - log_pt[:-1]
-        ic_series = rank_info_coefficient(signals_test[:-1], returns_test, mask_test[1:], per_timestep=True)
-        ic = ic_summary(ic_series)
-
-        results[f"lambda_{lam}"] = {
-            "sharpe": bt["sharpe_ratio"],
-            "annual_return": bt["annual_return"],
-            "max_drawdown": bt["max_drawdown"],
-            "turnover": bt["turnover"],
-            "ic": ic["ic_mean"], "ic_t": ic["ic_t_stat"],
-        }
-        print(f"\n  λ={lam}: Sharpe={bt['sharpe_ratio']:+.4f}  "
-              f"Turnover={bt['turnover']:.4f}  IC={ic['ic_mean']:+.4f}  "
-              f"t={ic['ic_t_stat']:+.2f}")
+    # λ* 由 val 净 Sharpe 决定(并列时取更小 λ = 更接近原始信号)
+    lam_star = max(lambdas, key=lambda l: (val_results[l]["sharpe"], -l))
+    print(f"\n  λ* = {lam_star} (由 val 净 Sharpe 选择)")
 
     report = {
-        "experiment": "EXP-20260809-02",
-        "stocks": N, "lambdas": lambdas,
-        "results": results,
+        "experiment": "EXP-20260809-02-v2",
+        "alignment": "k→k+1",
+        "lambda_selection": "val 段净 Sharpe 最优 (test 仅报告)",
+        "stocks": N, "lambdas": lambdas, "lambda_star": lam_star,
+        "engine_cfg": engine_cfg,
+        "config_hash": config_hash({"stocks": N, "lambdas": lambdas, **engine_cfg}),
+        "val": {str(k): v for k, v in val_results.items()},
+        "test": {str(k): v for k, v in test_results.items()},
         "time_seconds": round(time.time()-t0, 1),
     }
-    out_path = OUTPUT_DIR / "smoothing_ablation.json"
+    out_path = next_exp_path(OUTPUT_DIR, "daft-smoothing-ablation")
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\n    报告 → {out_path}")
