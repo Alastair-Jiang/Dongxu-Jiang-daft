@@ -148,15 +148,17 @@ def main():
             model.memory.detach_state()
     print(f"信号: {signals.shape}")
 
-    # ── 段切片(对齐 k→k+1, 末尾补哑元行供 engine 的 signals[:-1] 丢弃) ──
-    def seg(signals_full, t_start, t_end):  # [t_start, t_end) 天的信号 + 哑元
-        return torch.cat([signals_full[t_start:t_end], torch.zeros(1, N)], dim=0)
-
-    signals_val = seg(signals, t_train_end, t_val_end)
+    # ── 段切片(对齐 k→k+1) ──
+    # engine.run 要求 len(signals)==len(prices): 用 signals[:-1] 与
+    # returns(log_p[1:]-log_p[:-1]) 配对。
+    # val 段: signals_full[t_train_end:t_val_end] 恰有 t_val_end-t_train_end 行,
+    #         与 prices 同长(最后一行信号被 engine 丢弃)。
+    # test 段: signals_full 无 T-1 行, 需补一行哑元与 prices 对齐。
+    signals_val = signals[t_train_end:t_val_end]
     prices_val = panel.values[t_train_end:t_val_end, :, 3]
     mask_val = panel.mask[t_train_end:t_val_end]
 
-    signals_test = seg(signals, t_val_end, T - 1)
+    signals_test = torch.cat([signals[t_val_end:], torch.zeros(1, N)], dim=0)
     prices_test = panel.values[t_val_end:, :, 3]
     mask_test = panel.mask[t_val_end:]
 

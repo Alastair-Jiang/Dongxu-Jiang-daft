@@ -294,7 +294,7 @@ def main():
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\n    报告 → {out_path}")
-    print("    对比基准 → outputs/baseline_ridge_real_report.json")
+    print("    对比基准 → outputs/EXP-*-ridge-real.json (最新一条 Ridge 同口径报告)")
 
 
 if __name__ == "__main__":
