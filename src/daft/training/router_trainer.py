@@ -25,7 +25,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from daft.data.panel import Panel
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, rank_ic_by_timestep
 
 
 class RouterTrainer:
@@ -91,7 +91,7 @@ class RouterTrainer:
         balance_every = cfg.get("balance_every", 50)
         grad_clip_norm = cfg.get("grad_clip_norm", 1.0)
         entropy_weight = cfg.get("entropy_weight", 0.01)  # small entropy bonus
-        sparsity_weight = cfg.get("sparsity_weight", 0.05)  # per-sample sparsity
+        sparsity_weight = cfg.get("sparsity_weight", 0.01)  # per-sample sparsity (0.05 过强致坍缩, 降为 0.01)
 
         # --- Freeze experts ---
         for expert in self.model.experts:
@@ -102,18 +102,22 @@ class RouterTrainer:
         self.model.cross_dim_attn.modulation_strength = 0.1
 
         # --- Build s_t and targets ---
-        train_s, train_t, train_m = self._build_dataset(train_panel)
-        val_s, val_t, val_m = self._build_dataset(val_panel)
+        train_s, train_t, train_m, train_tidx = self._build_dataset(train_panel)
+        val_s, val_t, val_m, val_tidx = self._build_dataset(val_panel)
 
         # --- Move layer projections to device ---
         self.layer_proj.to(self.device)
         self.model.to(self.device)
 
         # --- Train / val loaders (no shuffle — memory is stateful) ---
-        train_ds = TensorDataset(train_s, train_t, train_m)
-        val_ds = TensorDataset(val_s, val_t, val_m)
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
-        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+        # 按日对齐批次(2026-08-16): 每批覆盖整数个交易日, 记忆行与资产保持
+        # 对应, 修复展平数据流破坏 KDA 时序语义(M_t=f(M_{t-1},s_t))的问题。
+        N_stocks = train_panel.N
+        eff_batch = max(N_stocks, (batch_size // N_stocks) * N_stocks)
+        train_ds = TensorDataset(train_s, train_t, train_m, train_tidx)
+        val_ds = TensorDataset(val_s, val_t, val_m, val_tidx)
+        train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=False)
+        val_loader = DataLoader(val_ds, batch_size=eff_batch, shuffle=False)
 
         # --- Optimizer (router + memory + CDAP + layer_proj only) ---
         trainable_params = (
@@ -154,14 +158,14 @@ class RouterTrainer:
             # ---- Validate ----
             self.model.eval()
             self.layer_proj.eval()
-            val_loss, val_signals, val_targets = self._run_epoch(
+            val_loss, val_signals, val_targets, val_tidx_c = self._run_epoch(
                 val_loader, None, False, return_predictions=True,
             )
 
-            # Compute validation IC (squeeze flattened (K,1) → (K,) for 1D path)
-            val_ic = rank_info_coefficient(
-                val_signals.squeeze(-1), val_targets.squeeze(-1), None,
-                per_timestep=True,
+            # 逐时步截面 rank IC (2026-08-16 修复): 旧实现把展平样本
+            # 池化成单个 Pearson 相关, ICIR/t-stat 恒等于 IC 本身(退化)。
+            val_ic = rank_ic_by_timestep(
+                val_signals.squeeze(-1), val_targets.squeeze(-1), val_tidx_c,
             )
             val_ic_summary = ic_summary(val_ic) if val_ic.numel() > 0 else {
                 "ic_mean": 0.0, "ic_std": 0.0, "icir": 0.0,
@@ -213,7 +217,11 @@ class RouterTrainer:
 
     # ------------------------------------------------------------------
     def _build_dataset(self, panel: Panel):
-        """Build s_t, targets, mask from panel."""
+        """Build s_t, targets, mask, timestep-index from panel.
+
+        Returns (s_2d, t_1d, m_1d, t_idx): 展平样本 + 每个样本的原始
+        时间步索引(用于逐时步截面 IC, 2026-08-16 修复)。
+        """
         extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
         with torch.no_grad():
             s_t_raw = extractor(panel)                     # (T, N, 200)
@@ -232,11 +240,13 @@ class RouterTrainer:
         targets = (log_c[1:] - log_c[:-1]).clamp(-0.5, 0.5)   # (T-1, N)
         s_aligned = s_t[:-1]                                    # (T-1, N, 200)
 
-        # Flatten (T, N) → (T*N, 200)
+        # Flatten (T, N) → (T*N, 200), t-major
         T, N = targets.shape
         s_2d = s_aligned.reshape(T * N, 200)
         t_1d = targets.reshape(T * N, 1)
         m_1d = panel.mask[:-1].reshape(T * N, 1)
+        # 时间步索引: 展平后第 r 行的原始 t = r // N
+        t_idx = torch.arange(T, device=s_2d.device).repeat_interleave(N)
 
         # Drop masked-out samples
         valid = m_1d.squeeze(-1)
@@ -244,8 +254,9 @@ class RouterTrainer:
             s_2d = s_2d[valid]
             t_1d = t_1d[valid]
             m_1d = m_1d[valid]
+            t_idx = t_idx[valid]
 
-        return s_2d, t_1d, m_1d
+        return s_2d, t_1d, m_1d, t_idx
 
     # ------------------------------------------------------------------
     def _run_epoch(
@@ -256,7 +267,7 @@ class RouterTrainer:
         balance_every: int = 50,
         grad_clip_norm: float = 1.0,
         entropy_weight: float = 0.01,
-        sparsity_weight: float = 0.05,
+        sparsity_weight: float = 0.01,
         return_predictions: bool = False,
     ):
         """Run one epoch, optionally training.
@@ -265,7 +276,7 @@ class RouterTrainer:
         -------
         avg_loss : float
         avg_entropy : float (training only) OR
-        signals, targets : (return_predictions mode)
+        signals, targets, t_idx : (return_predictions mode)
         """
         total_loss = 0.0
         total_entropy = 0.0
@@ -273,11 +284,12 @@ class RouterTrainer:
 
         all_signals = []
         all_targets = []
+        all_tidx = []
 
         # Reset memory at epoch start
         self.model.memory.reset_state(1, self.device)
 
-        for step, (s_b, t_b, m_b) in enumerate(loader):
+        for step, (s_b, t_b, m_b, ti_b) in enumerate(loader):
             s_b = s_b.to(self.device)
             t_b = t_b.to(self.device)
             m_b = m_b.to(self.device)
@@ -387,6 +399,7 @@ class RouterTrainer:
                 if return_predictions:
                     all_signals.append(signal.cpu())
                     all_targets.append(t_b.cpu())
+                    all_tidx.append(ti_b.cpu())
 
             # Detach memory to limit BPTT
             self.model.memory.detach_state()
@@ -398,7 +411,8 @@ class RouterTrainer:
         if return_predictions:
             signals = torch.cat(all_signals, dim=0) if all_signals else torch.zeros(0, 1)
             targets = torch.cat(all_targets, dim=0) if all_targets else torch.zeros(0, 1)
-            return avg_loss, signals, targets
+            t_idx = torch.cat(all_tidx, dim=0) if all_tidx else torch.zeros(0, dtype=torch.long)
+            return avg_loss, signals, targets, t_idx
 
         return avg_loss, avg_entropy
 

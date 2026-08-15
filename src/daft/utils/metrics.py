@@ -48,6 +48,53 @@ def rank_info_coefficient(
     return _rank_ic_1d(predictions, targets, mask, per_timestep)
 
 
+def rank_ic_by_timestep(
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    t_idx: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """按时间步分组的截面 rank IC (2026-08-16 新增)。
+
+    训练期验证的正确 IC: 展平样本按原始时间步分组, 每个时间步在截面
+    (各资产)上算 Spearman rank IC, 返回 (T,) 序列供 ic_summary 汇总。
+    修复了旧实现把展平样本池化成单个 Pearson 相关、ICIR/t-stat 退化
+    (恒等于 IC)的问题。
+
+    Parameters
+    ----------
+    predictions, targets : (K,) 展平的预测与目标
+    t_idx : (K,) long 每行所属的原始时间步索引
+    mask : (K,) bool, optional 默认全有效
+
+    Returns
+    -------
+    ic_vals : (T',) 每个时间步的截面 rank IC(仅含有效样本数 ≥3 的步)
+    """
+    predictions = predictions.reshape(-1)
+    targets = targets.reshape(-1)
+    t_idx = t_idx.reshape(-1).long()
+    if mask is None:
+        mask = torch.ones_like(predictions, dtype=torch.bool)
+    else:
+        mask = mask.reshape(-1)
+
+    device = predictions.device
+    ic_vals = []
+    for t in t_idx.unique().tolist():
+        sel = t_idx == t
+        m_t = mask[sel]
+        if m_t.sum() < 3:
+            continue
+        p_ranked = _masked_rank(predictions[sel], m_t)
+        r_ranked = _masked_rank(targets[sel], m_t)
+        ic_vals.append(_pearson_r(p_ranked, r_ranked, m_t))
+
+    if not ic_vals:
+        return torch.zeros(0, device=device)
+    return torch.stack(ic_vals)
+
+
 def ic_summary(ic_series: torch.Tensor) -> Dict[str, float]:
     """Compute IC statistics from a per-timestep IC series.
 
@@ -123,6 +170,7 @@ def _rank_ic_2d(
     """Per-timestep cross-sectional rank IC."""
     T, N = predictions.shape
     ic_vals = torch.zeros(T, device=predictions.device)
+    valid_t = torch.zeros(T, dtype=torch.bool, device=predictions.device)
 
     for t in range(T):
         p_t = predictions[t]   # (N,)
@@ -140,10 +188,13 @@ def _rank_ic_2d(
 
         # Pearson r on ranks = Spearman rho
         ic_vals[t] = _pearson_r(p_ranked, r_ranked, m_t)
+        valid_t[t] = True
 
     if per_timestep:
         return ic_vals
-    return ic_vals[ic_vals != 0].mean().item() if ic_vals.any() else 0.0
+    # 修复(2026-08-16): 旧实现 ic_vals[ic_vals != 0] 会把 IC 恰好为 0 的
+    # 交易日丢掉, 与 ic_summary(保留 0)口径不一致。改为按"有效时间步"平均。
+    return ic_vals[valid_t].mean().item() if valid_t.any() else 0.0
 
 
 def _rank_ic_1d(
