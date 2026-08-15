@@ -171,26 +171,30 @@ class TestModulationStrength:
         )
 
     def test_zero_modulation_preserves_routing(self):
-        """With modulation_strength=0, routing should still be a valid
-        probability distribution, though re-softmax may sharpen it."""
+        """调制关闭(scale=0 或 δ=0)时, 输出必须严格等于输入路由分布。
+
+        logit 空间实现(2026-08-16)保证 softmax(log p + 0) = p 严格恒等,
+        修复了旧实现 softmax(p) ≠ p 的初始化扭曲。
+        """
         c = CrossDimensionAttention(modulation_strength=0.0)
         routing, memory, layers = _make_inputs(8)
         routing_mod, _, _, _ = c(routing, memory, layers)
-        # Output should still be a valid distribution (sums to 1)
-        assert torch.allclose(routing_mod.sum(dim=-1), torch.ones(8), atol=1e-5)
-        # All entries non-negative
-        assert (routing_mod >= 0).all()
+        assert torch.allclose(routing_mod, routing, atol=1e-5), (
+            "δ=0 时 CDAP 不得改变路由分布(logit 空间恒等)"
+        )
 
     def test_nonzero_modulation_changes_routing(self):
-        """With zero-init scales, this actually tests re-softmax sharpening,
-        not modulation. See test_modulation_path_actually_works for the
-        true modulation test."""
+        """零初始化 scale 下 CDAP 必须严格无扰动(路由保持不变)。
+
+        旧实现在概率空间做 softmax(p+δb), 即使 scale=0 也会"锐化"路由 —
+        那是 bug, 不是特性。
+        """
         c = CrossDimensionAttention(modulation_strength=1.0)
         routing, memory, layers = _make_inputs(8)
         routing_mod, _, _, _ = c(routing, memory, layers)
-        # Output differs from input due to re-softmax sharpening
-        # (softmax is not idempotent)
-        assert not torch.allclose(routing_mod, routing, atol=1e-3)
+        assert torch.allclose(routing_mod, routing, atol=1e-5), (
+            "零 scale 下 CDAP 不得改变路由(logit 空间恒等)"
+        )
 
     def test_partial_modulation(self):
         """δ=0.5 should change routing but less than δ=1.0.

@@ -170,14 +170,16 @@ class CrossDimensionAttention(nn.Module):
 
         # === Step 3: Reverse projections — from joint back to each dimension ===
 
-        # → Router: additive bias in logit space
+        # → Router: additive bias in logit space (2026-08-16 修复)。
+        # 旧实现 softmax(p + δ·bias) 在概率空间相加: 即使 bias=0,
+        # softmax(p) ≠ p, CDAP 从初始化起就扭曲路由分布。logit 空间
+        # p' = softmax(log p + δ·bias) 在 bias=0 时恒等于 p(严格无扰动)。
         expert_bias = self.joint_to_expert_bias(joint)             # (B, n_experts)
         expert_bias = expert_bias * self.expert_bias_scale.tanh()  # Learned scale
-        routing_modulated = routing_probs + (
-            self.modulation_strength * expert_bias
+        log_p = (routing_probs + 1e-12).log()
+        routing_modulated = F.softmax(
+            log_p + self.modulation_strength * expert_bias, dim=-1
         )
-        # Ensure valid probability distribution
-        routing_modulated = F.softmax(routing_modulated, dim=-1)
 
         # → Memory: forget gate modulation signal
         memory_gate_raw = self.joint_to_memory_gate(joint)         # (B, d_k)

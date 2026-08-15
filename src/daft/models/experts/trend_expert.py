@@ -37,6 +37,8 @@ class TrendExpert(BaseExpert):
         across assets via mean. Returns True for time steps where the
         average ADX exceeds 25 — indicating sustained directional movement.
         """
+        from daft.models.experts.base_expert import _compute_adx_mask
+
         return _compute_adx_mask(panel, threshold=25.0, above=True)
 
     def compute_loss(
