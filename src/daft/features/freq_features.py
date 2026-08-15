@@ -14,6 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from daft.features.base_features import ensure_base_panel
+
 
 class FreqFeatureExtractor(nn.Module):
     """FFT-based spectral feature extractor.
@@ -114,7 +116,8 @@ class FreqFeatureExtractor(nn.Module):
         ----------
         panel : Panel
             Market data panel with values of shape (T, N, F).
-            F ≥ 2: index 0 = close/price, index 1 = log_return.
+            接受 OHLCV 布局或基础布局(见 features/base_features.py)。
+            FFT 使用基础布局里的 log_return(索引 1)。
 
         Returns
         -------
@@ -123,6 +126,9 @@ class FreqFeatureExtractor(nn.Module):
             are the PSD bins; the last 3 are low/mid/high band powers.
             For t < lookback, all values are 0.
         """
+        # ── 通道契约: 统一为基础特征布局 (2026-08-16 修复) ──
+        panel = ensure_base_panel(panel)
+
         T, N, F = panel.values.shape
         device = panel.device
 

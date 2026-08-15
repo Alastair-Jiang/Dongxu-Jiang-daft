@@ -19,6 +19,7 @@ Each factor has the signature:
 import torch
 
 from daft.features.tensor_factors import TensorFactorEngine
+from daft.features.base_features import ensure_base_panel
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -26,32 +27,36 @@ from daft.features.tensor_factors import TensorFactorEngine
 # ═══════════════════════════════════════════════════════════════════════
 
 def _get_mask(panel):
-    """Get 2D tradability mask (T, N) from panel."""
-    return panel.mask[:, :, 0]
+    """Get 2D tradability mask (T, N) from panel.
+
+    兼容 (T, N) 与历史 (T, N, F) 两种 mask 形状(2026-08-16 修复)。
+    """
+    m = panel.mask
+    return m[:, :, 0] if m.ndim == 3 else m
 
 
 def _ret(panel):
-    """Log return series (T, N)."""
+    """Log return series (T, N). 要求基础特征布局。"""
     return panel.values[:, :, 1]
 
 
 def _close(panel):
-    """Close price series (T, N)."""
+    """Close price series (T, N). 要求基础特征布局。"""
     return panel.values[:, :, 0]
 
 
 def _volume(panel):
-    """Volume series (T, N)."""
+    """Volume series (T, N). 要求基础特征布局。"""
     return panel.values[:, :, 2]
 
 
 def _vol_ratio(panel):
-    """Volume ratio series (T, N)."""
+    """Volume ratio series (T, N). 要求基础特征布局。"""
     return panel.values[:, :, 3]
 
 
 def _volatility(panel):
-    """Volatility series (T, N)."""
+    """Volatility series (T, N). 要求基础特征布局。"""
     return panel.values[:, :, 4]
 
 
@@ -481,17 +486,25 @@ def compute_all_factors(panel) -> dict:
     Parameters
     ----------
     panel : Panel
+        OHLCV 或基础特征布局(自动转换)。
 
     Returns
     -------
     factors : dict[str, torch.Tensor]
         Mapping from factor name to (T, N) tensor.
+        失败因子记录为 None 并在返回值里附带 _errors 列表
+        (2026-08-16: 不再静默吞掉异常)。
     """
+    panel = ensure_base_panel(panel)
     engine = TensorFactorEngine()
     result = {}
+    errors = []
     for name, factor_fn in LEGACY_FACTOR_REGISTRY.items():
         try:
             result[name] = factor_fn(panel, engine)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — 收集失败但继续
             result[name] = None
+            errors.append(f"{name}: {type(e).__name__}: {e}")
+    if errors:
+        result["_errors"] = errors
     return result
