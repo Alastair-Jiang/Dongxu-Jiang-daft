@@ -10,34 +10,40 @@
 ```
 M1 工程修复 ✅ 2026-08-16  PR #9 合入(通道契约/口径/脚本健康)
 M2 全面升级 ✅ 2026-08-16  工厂去重/涨跌停 mask/hs300 股票池
-M3 扩池重测 🔄 进行中      100 股 Ridge + DAFT + 平滑消融
-M4 稳健性验证 ⬜           多窗口 walk-forward + 消融矩阵
+M3 扩池重测 ✅ 2026-08-16  Ridge 100 IC 0.048/Sharpe +0.53;
+                           DAFT 100 IC 0.037/平滑 −0.60 → 有条件 GO
+M4 稳健性验证 🔄           多窗口 walk-forward + 换手控制 + 信号增强
 M5 判定 ⬜ (09-30 前)      GO / 有条件 GO / NO-GO
 ```
 
 ---
 
-## 当前周期: 扩池重测(本周)
+## 当前周期: 扩池重测(已完成 ✅)
 
-| # | 实验 | 命令 | 状态 |
+| # | 实验 | 命令 | 结果 |
 |---|---|---|---|
-| 1 | Ridge 100 股 (train 60%) | `python scripts/run_baseline_ridge_real.py --stocks 100 --train-frac 0.6 --universe hs300` | 🔄 |
-| 2 | DAFT quick OOS 100 股 | `python scripts/run_full_pipeline_oos.py --stocks 100 --universe hs300` | ⬜ |
-| 3 | 平滑消融 100 股 (λ val 选) | `python scripts/run_smoothing_ablation.py --stocks 100 --universe hs300` | ⬜ |
-| 4 | 登记 EXP + 判定读法 | 更新 EXPERIMENT_REGISTRY.md | ⬜ |
+| 1 | Ridge 100 股 (train 60%) | `python scripts/run_baseline_ridge_real.py --stocks 100 --train-frac 0.6 --universe hs300` | ✅ IC 0.048 / t 5.19 / Sharpe +0.53 |
+| 2 | DAFT quick OOS 100 股 | `python scripts/run_full_pipeline_oos.py --stocks 100 --universe hs300` | ✅ IC 0.037 / t 3.65 / Sharpe −1.72 |
+| 3 | 平滑消融 100 股 (λ val 选) | `python scripts/run_smoothing_ablation.py --stocks 100 --universe hs300` | ✅ λ*=0.7: 换手 0.98 / Sharpe −0.60 |
+| 4 | 登记 EXP + 判定读法 | EXPERIMENT_REGISTRY.md | ✅ EXP-20260816-05~07 |
 
-**读法**: 100 股截面的 t 检验效力约为 30 股的 3.3 倍(√(100/30)≈1.8 倍
-截面 × 同窗口)。若 100 股 IC 仍 < 0.02 且 t < 2, 进入 M4 多窗口复核;
-若多窗口仍无信号 → M5 按预注册判定(大概率 NO-GO(交易) → 转型研究项目)。
+**读法(已确认)**: 30 股无信号是股票池效应; 100 股 hs300 下信号显著存在,
+Ridge 基线即达 GO 线。DAFT 有信号(IC 0.037/t 3.65)但弱于 Ridge 且换手
+更高 → **落入预注册"有条件 GO"区间**。条件动作见 M4。
 
 ---
 
-## 下一周期: M4 稳健性验证(1-2 周)
+## 下一周期: M4 稳健性验证(1-2 周) — 有条件 GO 的动作清单
 
-1. **多窗口 walk-forward**: 2-3 折滚动窗口, 每折独立训练/评估。
-2. **消融矩阵**: no-cdap / no-memory / sparsity 0.01 vs 0.05。
-3. **信号平滑扩展**: λ∈{0.7, 0.8, 0.9} 扫描(上轮 λ=0.7 净 Sharpe −0.14 已接近 0)。
-4. **频率扩展(可选)**: 日线 → 周线重采样, 降低换手成本占比。
+1. **换手控制(优先)**: 平滑 λ∈{0.7,0.8,0.9} 扫描; rebalance_freq=2/5;
+   分数仓位(信号强度加权)替代等权 top-k — 目标把 DAFT 净 Sharpe 拉到
+   接近或超过 Ridge 的 +0.53。
+2. **信号增强**: Stage 2/3 全量训练(--full)、sparsity 0.01 vs 0.05 对比、
+   特征消融(哪些因子组贡献 IC)。
+3. **成本真实性**: T+1、涨跌停成交限制(已做 mask, 待做成交约束)、
+   按 ADV 的冲击模型。
+4. **多窗口 walk-forward**: 2-3 折滚动窗口复核单窗口结论。
+5. **消融矩阵**: no-cdap / no-memory 归因(信号存在后才有归因价值)。
 
 ---
 

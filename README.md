@@ -33,18 +33,25 @@ The architecture is systematically derived from **Kimi K3** (Moonshot AI, July 2
 
 **工程修复批次已合入 main(PR #9)** — 三人评审 + 运行时验证发现并修复了 8 类问题, 最重要的是**通道契约 bug**: 数据源 OHLCV 一直被特征引擎当作 `[close, log_return, ...]` 错列读取, 此前所有实验的 s_t 都建立在错列上。详见 [docs/FIX_REPORT_20260816.md](docs/FIX_REPORT_20260816.md)。
 
-**当前实验结果(修复后, 2021–2025 日线, 30 股, 严格样本外)**:
+**实验结果(修复后新口径: hs300 真实成分 + 涨跌停 mask + 严格样本外)**:
 
-| 变体 | OOS Rank IC | IC t | 净 Sharpe | 真实换手 |
-|---|---|---|---|---|
-| Ridge 基线 | +0.0001 | +0.01 | −1.10 | 1.74 |
-| DAFT (quick) | +0.0077 | +0.51 | −1.66 | 2.37 |
-| DAFT + 信号平滑 λ*=0.7 | +0.0128 | +0.81 | **−0.14** | 0.96 |
+| 口径 | 变体 | OOS Rank IC | IC t | 净 Sharpe | 真实换手 |
+|---|---|---|---|---|---|
+| 30 股日线 | Ridge 基线 | +0.0001 | +0.01 | −1.10 | 1.74 |
+| 30 股日线 | DAFT (quick) | +0.0077 | +0.51 | −1.66 | 2.37 |
+| **100 股 hs300** | **Ridge 基线** | **+0.0482** | **+5.19** | **+0.53** | 1.85 |
+| **100 股 hs300** | **DAFT (quick)** | **+0.0368** | **+3.65** | **−1.72** | 2.34 |
+| **100 股 hs300** | **DAFT + 平滑 λ*=0.7** | +0.0274 | +2.36 | **−0.60** | 0.98 |
 
-- 修复前 Ridge 的 "IC=0.029 / t=1.89" 是错列特征的产物, **已作废**; 修复后基线信号 ≈ 0。
-- 信号平滑(λ 在 val 段选)把换手减半、净 Sharpe −1.66→−0.14, 验证了降换手的假设, 但尚未转正。
-- 所有数字可追溯到 `outputs/EXP-20260816-*.json` 与 [EXPERIMENT_REGISTRY.md](docs/EXPERIMENT_REGISTRY.md)(含预注册的 v1.0.0 Go/No-Go 判定标准, 截止 2026-09-30)。
-- **下一步**: 股票池 30→100+、涨跌停 mask、多窗口 walk-forward 后重测再判定。
+- **30 股无信号是股票池效应**; 100 股 hs300 下信号显著存在, Ridge 基线
+  即达预注册 GO 线(IC≥0.04 且 t≥2.0)。
+- **DAFT 有信号但尚弱于线性基线**(0.037 vs 0.048)且换手更高; 信号平滑
+  (λ 由 val 选)把换手减半、净 Sharpe −1.72→−0.60, 验证了降换手假设。
+- **判定预判: 有条件 GO** — 需换手控制 + 信号增强 + 成本真实性后重测
+  (判据与全量数字见 [EXPERIMENT_REGISTRY.md](docs/EXPERIMENT_REGISTRY.md),
+  截止 2026-09-30)。
+- 全部数字可追溯至 `outputs/EXP-20260816-*.json` + config hash;
+  规划见 [ROADMAP.md](docs/ROADMAP.md), 评判见 [PROJECT_EVALUATION.md](docs/PROJECT_EVALUATION.md)。
 
 ---
 
