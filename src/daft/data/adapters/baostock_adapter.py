@@ -48,8 +48,14 @@ class BaostockAdapter:
         self.end_date = config.get("end_date", "2025-12-31")
         self.frequency = config.get("frequency", "d")   # d, w, m, 5, 15, 30, 60
         self.n_stocks = config.get("n_stocks", 50)
-        self.tickers = config.get("tickers", None)        # None → use sample
+        self.tickers = config.get("tickers", None)        # None → use universe
+        # 股票池(2026-08-16 新增): "sample" = 内置 CSI300_SAMPLE 静态清单;
+        # "hs300" = 用 baostock query_hs300_stocks 按 start_date 拉取真实
+        # 沪深300 成分(缓解幸存者偏差 + 解除 50 只上限)
+        self.universe = config.get("universe", "sample")
         self.adjust = config.get("adjust", "2")            # 2 = forward-adjusted
+        # 涨跌停处理(2026-08-16 新增): True → 涨跌停日 mask=False(不可成交)
+        self.handle_limit_up_down = config.get("handle_limit_up_down", True)
         self.feature_names = ["open", "high", "low", "close", "volume"]
 
     # ------------------------------------------------------------------
@@ -74,9 +80,9 @@ class BaostockAdapter:
         if lg.error_code != "0":
             _logger.warning("baostock login: %s — %s", lg.error_code, lg.error_msg)
 
-        tickers = self.tickers or CSI300_SAMPLE[:self.n_stocks]
-        _logger.info("Downloading %d stocks from baostock (%s → %s)",
-                      len(tickers), self.start_date, self.end_date)
+        tickers = self.tickers or self._resolve_universe(bs)
+        _logger.info("Downloading %d stocks from baostock (%s → %s, universe=%s)",
+                      len(tickers), self.start_date, self.end_date, self.universe)
 
         all_data: Dict[str, pd.DataFrame] = {}
         try:
@@ -100,6 +106,32 @@ class BaostockAdapter:
 
         # --- Align to common date index ---
         return self._to_panel(all_data)
+
+    # ------------------------------------------------------------------
+    def _resolve_universe(self, bs) -> list:
+        """按 universe 解析股票池(2026-08-16 新增)。
+
+        - "hs300": 用 baostock query_hs300_stocks 按 start_date 拉取
+          沪深300 成分(取前 n_stocks 只); 失败回退到内置静态清单。
+        - "sample": 内置 CSI300_SAMPLE 静态清单(最多 50 只)。
+        """
+        if self.universe == "hs300" and hasattr(bs, "query_hs300_stocks"):
+            try:
+                rs = bs.query_hs300_stocks(date=self.start_date)
+                if rs.error_code == "0":
+                    rows = []
+                    while rs.next():
+                        rows.append(rs.get_row_data())
+                    # 字段: updateDate, code, code_name
+                    codes = [r[1] for r in rows]
+                    if codes:
+                        _logger.info("hs300 universe: %d constituents as of %s",
+                                     len(codes), self.start_date)
+                        return codes[: self.n_stocks]
+            except Exception as e:  # noqa: BLE001 — 回退静态清单
+                _logger.warning("query_hs300_stocks failed: %r; 回退 sample", e)
+            _logger.warning("hs300 universe 不可用, 回退 sample")
+        return CSI300_SAMPLE[: self.n_stocks]
 
     # ------------------------------------------------------------------
     def _query_ticker(self, bs, ticker: str, max_attempts: int = 3):
@@ -168,6 +200,13 @@ class BaostockAdapter:
             close_col = df_aligned["close"].values
             mask[:, j] = ~np.isnan(close_col)
 
+            # 涨跌停 mask (2026-08-16 新增): 当日 |涨跌幅| 达到涨停板阈值的
+            # 日期不可成交(A 股 T+1 下, 涨停买不进/跌停卖不出)。
+            # 阈值按交易所板块: 创业板(300/301)、科创板(688) ±20%, 其余 ±10%。
+            if self.handle_limit_up_down:
+                limit_mask = _limit_move_mask(close_col, ticker)
+                mask[:, j] &= limit_mask
+
         return Panel(
             values=torch.from_numpy(values),
             mask=torch.from_numpy(mask),
@@ -179,6 +218,7 @@ class BaostockAdapter:
                 "start_date": self.start_date,
                 "end_date": self.end_date,
                 "frequency": self.frequency,
+                "handle_limit_up_down": self.handle_limit_up_down,
             },
         )
 
@@ -186,6 +226,38 @@ class BaostockAdapter:
 # -----------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------
+
+def _limit_move_mask(close_col: "np.ndarray", ticker: str) -> "np.ndarray":
+    """(T,) bool — False 表示当日触及涨跌停, 视为不可成交。
+
+    A 股规则(主板 ±10%, 创业板 300/301 与科创板 688 ±20%, 留 0.5% 余量
+    防止复权误差): 当日 close 相对前一交易日 close 的 |涨跌幅| ≥ 阈值,
+    或当日一字板(开盘即封死, open==close 且涨幅 ≥ 阈值)时置 False。
+
+    首个交易日无前收盘, 不判涨跌停(True); 缺失收盘(NaN)的日子保持
+    True — 它们已由 NaN mask 置 False, 不再重复处理。
+    """
+    import numpy as np
+
+    limit = 0.195 if _is_gem_or_star(ticker) else 0.095
+    T = len(close_col)
+    out = np.ones(T, dtype=bool)
+
+    prev = close_col[:-1]
+    curr = close_col[1:]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pct = (curr - prev) / np.abs(prev)
+    valid = np.isfinite(pct) & (prev > 0)
+    hit = valid & (np.abs(pct) >= limit)
+    out[1:][hit] = False
+    return out
+
+
+def _is_gem_or_star(ticker: str) -> bool:
+    """创业板(300/301) 或科创板(688) → ±20% 涨跌幅限制。"""
+    code = ticker.split(".")[-1]
+    return code.startswith("300") or code.startswith("301") or code.startswith("688")
+
 
 def _forward_fill_limit(arr: "np.ndarray", limit: int = 5) -> "np.ndarray":
     """Forward-fill NaN values up to ``limit`` consecutive bars."""
