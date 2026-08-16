@@ -187,7 +187,7 @@ class TestLimitMoveMask:
         assert m[0] == True  # 首日无前收盘
 
     def test_nan_prev_close_not_limit(self):
-        m = self._mask([np.nan, 10.0, 11.0], "sh.600000")
+        m = self._mask([float("nan"), 10.0, 11.0], "sh.600000")
         # prev NaN 的日子由 NaN mask 处理, 涨跌停判定保持 True
         assert m.tolist() == [True, True, False]
 
