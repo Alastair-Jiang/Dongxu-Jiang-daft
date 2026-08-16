@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DAFT v0.3.0 项目全景工程图</title>
+<style>
+  @page { size: A3 landscape; margin: 8mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: #ffffff; }
+  body { font-family: "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  .canvas { width: 100%; }
+  .canvas svg { display: block; width: 100%; height: auto; }
+
+  svg.diag { font-family: "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  svg.diag text { dominant-baseline: middle; text-anchor: middle; }
+  svg.diag .mono { font-family: "Cascadia Code",Consolas,monospace; }
+
+  svg.diag .bx      { fill:#ffffff; stroke:#0b2b4a; stroke-width:1.4; }
+  svg.diag .bx-fill { fill:#0b2b4a; stroke:#0b2b4a; stroke-width:1.4; }
+  svg.diag .bx-acc  { fill:#0a6b8f; stroke:#0a6b8f; stroke-width:1.4; }
+  svg.diag .bx-soft { fill:#eef3f8; stroke:#c9d6e4; stroke-width:1.1; }
+  svg.diag .tns     { fill:#f7f8fa; stroke:#dfe4ec; stroke-width:1.1; }
+  svg.diag .edge    { stroke:#8a94a5; stroke-width:1.3; fill:none; }
+  svg.diag .edge-a  { stroke:#0a6b8f; stroke-width:1.8; fill:none; }
+  svg.diag .mk      { fill:#8a94a5; }
+  svg.diag .mk-a    { fill:#0a6b8f; }
+
+  svg.diag .tt      { font-size:15px; font-weight:700; fill:#0b2b4a; }
+  svg.diag .tt-w    { font-size:14px; font-weight:700; fill:#ffffff; }
+  svg.diag .tt-acc  { font-size:14px; font-weight:700; fill:#0a6b8f; }
+  svg.diag .lb      { font-size:12.5px; fill:#16181d; }
+  svg.diag .lb-w    { font-size:12px; fill:#ffffff; }
+  svg.diag .lb-mut  { font-size:11px; fill:#5b6472; }
+  svg.diag .sh      { font-size:10.5px; fill:#7a8394; }
+  svg.diag .eq      { font-size:12px; fill:#0a6b8f; font-weight:700; }
+  svg.diag .grp     { fill:none; stroke:#d5dce6; stroke-width:1.2; stroke-dasharray:5 4; }
+  svg.diag .grp-a   { fill:none; stroke:#0a6b8f; stroke-width:1.4; stroke-dasharray:6 4; }
+  svg.diag .h1      { font-size:34px; font-weight:800; fill:#0b2b4a; }
+  svg.diag .h2      { font-size:15px; fill:#5b6472; }
+  svg.diag .layer   { font-size:20px; font-weight:800; fill:#0b2b4a; }
+  svg.diag .layer-en{ font-size:12px; fill:#8a94a5; }
+</style>
+</head>
+<body>
+<div class="canvas">
+<svg class="diag" viewBox="0 0 3000 2000" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DAFT 项目全景工程图">
+  <defs>
+    <marker id="ar"  viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+    <marker id="ara" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-a"/></marker>
+  </defs>
+
+  <!-- ==================== 标题 ==================== -->
+  <text class="h1" x="1500" y="52">DAFT v0.3.0 — 项目全景工程图</text>
+  <text class="h2" x="1500" y="86">Dimension-Aware Financial Trading · 数据 → 特征 → 模型 → 回测 → 判定（推理路径）＋ 训练四阶段（构建路径）</text>
+
+  <!-- ==================== ① 数据层 ==================== -->
+  <rect class="grp" x="40" y="112" width="2920" height="150" rx="10"/>
+  <text class="layer" x="70" y="142" text-anchor="start">① 数据层</text>
+  <text class="layer-en mono" x="150" y="142" text-anchor="start">data/</text>
+
+  <rect class="bx" x="70" y="160" width="300" height="66" rx="6"/>
+  <text class="tt" x="220" y="183">synthetic HMM</text>
+  <text class="sh" x="220" y="203">三状态隐马尔可夫 · 合成数据</text>
+  <text class="eq mono" x="220" y="217">loaders.py</text>
+
+  <rect class="bx" x="420" y="160" width="300" height="66" rx="6"/>
+  <text class="tt" x="570" y="183">baostock (A股)</text>
+  <text class="sh" x="570" y="203">hs300 成分股 · 复权 + 涨跌停</text>
+  <text class="eq mono" x="570" y="217">adapters/baostock_adapter.py</text>
+
+  <rect class="bx" x="770" y="160" width="300" height="66" rx="6"/>
+  <text class="tt" x="920" y="183">yfinance (美股)</text>
+  <text class="sh" x="920" y="203">S&amp;P 成分 · 复权收盘</text>
+  <text class="eq mono" x="920" y="217">adapters/yfinance_adapter.py</text>
+
+  <line class="edge" x1="370" y1="193" x2="420" y2="193" marker-end="url(#ar)"/>
+  <line class="edge" x1="720" y1="193" x2="770" y2="193" marker-end="url(#ar)"/>
+
+  <rect class="tns" x="1180" y="150" width="330" height="86" rx="6"/>
+  <text class="tt" x="1345" y="175">Panel 面板</text>
+  <text class="lb mono" x="1345" y="197">(T, N, 5)  ·  [O H L C V]</text>
+  <text class="sh" x="1345" y="216">时间 × 股票 × 特征 · 可交易性 mask</text>
+  <text class="eq mono" x="1345" y="230">panel.py</text>
+
+  <line class="edge" x1="1070" y1="193" x2="1180" y2="193" marker-end="url(#ar)"/>
+  <line class="edge-a" x1="1345" y1="236" x2="1345" y2="290" marker-end="url(#ara)"/>
+  <text class="sh" x="1360" y="262" text-anchor="start">RegimeFeatureExtractor 读取 5 基础特征</text>
+
+  <!-- ==================== ② 特征层 ==================== -->
+  <rect class="grp" x="40" y="308" width="2920" height="162" rx="10"/>
+  <text class="layer" x="70" y="338" text-anchor="0 start">② 特征层</text>
+  <text class="layer-en mono" x="150" y="338" text-anchor="start">features/regime_features.py</text>
+  <text class="sh" x="70" y="356" text-anchor="start">6 组特征族 → 200 维市场状态向量 s_t（5 个基础特征 + 195 维派生）</text>
+
+  <rect class="bx-soft" x="70" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="280" y="389">Price Dynamics</text>
+  <text class="lb mono" x="280" y="407">45 维 · 多周期收益/均线偏离/加速度</text>
+
+  <rect class="bx-soft" x="510" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="720" y="389">Volume Dynamics</text>
+  <text class="lb mono" x="720" y="407">35 维 · 量比/量趋势/量价相关</text>
+
+  <rect class="bx-soft" x="950" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="1160" y="389">Volatility Structure</text>
+  <text class="lb mono" x="1160" y="407">40 维 · 多窗波动/vol-of-vol</text>
+
+  <rect class="bx-soft" x="1390" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="1600" y="389">Microstructure</text>
+  <text class="lb mono" x="1600" y="407">20 维 · Amihud/价格冲击/价差</text>
+
+  <rect class="bx-soft" x="1830" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="2040" y="389">Cross-Sectional</text>
+  <text class="lb mono" x="2040" y="407">30 维 · 横截面排名/离散度/z-score</text>
+
+  <rect class="bx-soft" x="2270" y="370" width="420" height="52" rx="5"/>
+  <text class="tt" x="2480" y="389">Momentum &amp; Factor</text>
+  <text class="lb mono" x="2480" y="407">30 维 · 动量/反转/RSI/布林位</text>
+
+  <line class="edge" x1="280" y1="422" x2="280" y2="444"/>
+  <line class="edge" x1="720" y1="422" x2="720" y2="444"/>
+  <line class="edge" x1="1160" y1="422" x2="1160" y2="444"/>
+  <line class="edge" x1="1600" y1="422" x2="1600" y2="444"/>
+  <line class="edge" x1="2040" y1="422" x2="2040" y2="444"/>
+  <line class="edge" x1="2480" y1="422" x2="2480" y2="444"/>
+  <path class="edge" d="M280,444 L2480,444"/>
+
+  <rect class="tns" x="1360" y="452" width="280" height="28" rx="5"/>
+  <text class="eq mono" x="1500" y="466">s_t ∈ ℝ²⁰⁰ (B, 200)</text>
+
+  <line class="edge-a" x1="1500" y1="480" x2="1500" y2="558" marker-end="url(#ara)"/>
+
+  <!-- ==================== ③ 模型层（核心） ==================== -->
+  <rect class="grp-a" x="40" y="540" width="2920" height="700" rx="10"/>
+  <text class="layer" x="70" y="570" text-anchor="start">③ 模型层</text>
+  <text class="layer-en mono" x="150" y="570" text-anchor="start">models/  ·  ExpertEnsemble 七步前向</text>
+
+  <line class="edge" x1="285" y1="558" x2="1710" y2="558"/>
+  <line class="edge" x1="285" y1="558" x2="285" y2="600" marker-end="url(#ar)"/>
+  <line class="edge" x1="960" y1="558" x2="960" y2="600" marker-end="url(#ar)"/>
+  <line class="edge" x1="1710" y1="558" x2="1710" y2="600" marker-end="url(#ar)"/>
+  <text class="sh" x="1500" y="549">s_t 广播 → Router · 专家池 · CDAP/Memory（layer_proj 亦共享 s_t）</text>
+
+  <!-- RegimeRouter -->
+  <rect class="bx" x="70" y="600" width="430" height="210" rx="6"/>
+  <rect class="bx-fill" x="70" y="600" width="430" height="34" rx="6"/>
+  <text class="tt-w" x="285" y="617">RegimeRouter · Stable LatentMoE</text>
+  <text class="lb mono" x="285" y="648">s_t (200) → 100 → 16 latent</text>
+  <text class="sh" x="285" y="668">SiTU 激活 σ(x)⊙tanh(x) · LayerNorm</text>
+  <text class="sh" x="285" y="686">Quantile Balancing（无辅助负载损失）</text>
+  <text class="sh" x="285" y="704">Top-3 稀疏 · 温度缩放 softmax</text>
+  <text class="sh" x="285" y="722">train 加噪 std=0.1 · inference temp=0.1</text>
+  <text class="eq mono" x="285" y="748">router.py · z_t∈ℝ¹⁶ · probs∈ℝ¹⁰</text>
+  <text class="eq" x="285" y="790">输出：topk_indices / z_t / probs</text>
+
+  <!-- ExpertEnsemble -->
+  <rect class="bx" x="580" y="600" width="760" height="360" rx="6"/>
+  <rect class="bx-fill" x="580" y="600" width="760" height="34" rx="6"/>
+  <text class="tt-w" x="960" y="617">ExpertEnsemble — 10 专家池（5 类 × 2 实例）</text>
+
+  <rect class="bx-soft" x="600" y="650" width="220" height="60" rx="5"/>
+  <text class="tt" x="710" y="672">TrendExpert ×2</text>
+  <text class="sh mono" x="710" y="692">趋势 · hidden 64</text>
+
+  <rect class="bx-soft" x="840" y="650" width="220" height="60" rx="5"/>
+  <text class="tt" x="950" y="672">ReversalExpert ×2</text>
+  <text class="sh mono" x="950" y="692">反转 · hidden 64</text>
+
+  <rect class="bx-soft" x="1080" y="650" width="220" height="60" rx="5"/>
+  <text class="tt" x="1190" y="672">VolatilityExpert ×2</text>
+  <text class="sh mono" x="1190" y="692">波动 · hidden 48</text>
+
+  <rect class="bx-soft" x="600" y="725" width="220" height="60" rx="5"/>
+  <text class="tt" x="710" y="747">EventExpert ×2</text>
+  <text class="sh mono" x="710" y="767">事件 · hidden 48</text>
+
+  <rect class="bx-soft" x="840" y="725" width="220" height="60" rx="5"/>
+  <text class="tt" x="950" y="747">MomentumExpert ×2</text>
+  <text class="sh mono" x="950" y="767">动量 · hidden 64</text>
+
+  <text class="eq mono" x="960" y="815">experts/{trend,reversal,volatility,event,momentum}_expert.py</text>
+
+  <rect class="tns" x="600" y="838" width="720" height="108" rx="6"/>
+  <text class="tt-acc" x="960" y="858">七步前向 · 7-step forward</text>
+  <text class="lb" x="690" y="882" text-anchor="start">1 路由到专家 (top-3)</text>
+  <text class="lb" x="690" y="902" text-anchor="start">2 专家前向</text>
+  <text class="lb" x="690" y="922" text-anchor="start">3 CDAP 跨维互调（记忆前）</text>
+  <text class="lb" x="1180" y="882" text-anchor="start">4 更新 + 查询记忆（CDAP 门控）</text>
+  <text class="lb" x="1180" y="902" text-anchor="start">5 加权专家融合</text>
+  <text class="lb" x="1180" y="922" text-anchor="start">6 深度 + 记忆融合 → 7 组装输出</text>
+
+  <path class="edge-a" d="M500,700 C540,700 540,700 580,700" marker-end="url(#ara)"/>
+  <text class="sh" x="538" y="686" text-anchor="start">topk_indices + probs</text>
+
+  <!-- CDAP -->
+  <rect class="bx" x="1480" y="600" width="460" height="240" rx="6"/>
+  <rect class="bx-acc" x="1480" y="600" width="460" height="34" rx="6"/>
+  <text class="tt-w" x="1710" y="617">CDAP · CrossDimensionAttention</text>
+  <text class="tt-acc" x="1710" y="650">e ⊙ m ⊙ d 三维互调</text>
+  <text class="sh" x="1710" y="672">联合空间 joint ∈ ℝ⁶⁴</text>
+  <text class="sh" x="1710" y="692">d_k=128 · d_v=64 · n_layers=3</text>
+  <text class="sh" x="1710" y="712">3 个 learnable scale（zero-init）：</text>
+  <text class="lb mono" x="1710" y="733">expert_bias_scale · memory_gate_scale</text>
+  <text class="lb mono" x="1710" y="751">· depth_weight_scale</text>
+  <text class="sh" x="1710" y="773">训练中逐步放开（CDAP warmup 3 epochs）</text>
+  <text class="eq mono" x="1710" y="800">cross_dim_attn.py</text>
+
+  <!-- KDA Memory -->
+  <rect class="bx" x="1480" y="880" width="460" height="200" rx="6"/>
+  <rect class="bx-fill" x="1480" y="880" width="460" height="34" rx="6"/>
+  <text class="tt-w" x="1710" y="897">KDAMarketMemory · delta-rule</text>
+  <text class="sh" x="1710" y="924">键值记忆 d_k=128 · d_v=64</text>
+  <text class="sh" x="1710" y="944">bottleneck_ratio=4 · use_route_modulation</text>
+  <text class="sh" x="1710" y="964">delta-rule 增量写入 · safe_gate 门控</text>
+  <text class="sh" x="1710" y="984">记忆读出调制专家输出（CDAP 门控，同图）</text>
+  <text class="eq mono" x="1710" y="1015">memory.py</text>
+
+  <path class="edge-a" d="M1710,840 L1710,880" marker-end="url(#ara)"/>
+  <path class="edge" d="M1940,720 L1940,860 L1480,860" marker-end="url(#ar)"/>
+  <text class="sh" x="1960" y="795" text-anchor="start">记忆门控 g</text>
+
+  <!-- layer_proj + AHM -->
+  <rect class="bx-soft" x="70" y="1110" width="640" height="96" rx="6"/>
+  <text class="tt" x="390" y="1132">layer_proj — 特征层级投影 L0/L1/L2</text>
+  <text class="sh mono" x="390" y="1152">Linear(200→128) → SiLU → Linear(128→64) → LayerNorm(64)</text>
+  <text class="eq mono" x="390" y="1174">factory.py · build_layer_proj · 每层输出 64 维</text>
+  <text class="sh" x="390" y="1192">按 3 个时间尺度分层，供深度维 d 融合</text>
+
+  <rect class="bx-soft" x="1480" y="1110" width="460" height="96" rx="6"/>
+  <text class="tt" x="1710" y="1132">AHM · HardeningEngine</text>
+  <text class="sh" x="1710" y="1152">Adaptive Hardening · 研究性实现</text>
+  <text class="eq" x="1710" y="1174">默认禁用 (use_hardening=False)</text>
+  <text class="eq mono" x="1710" y="1192">hardening.py</text>
+
+  <!-- 模型 → 回测（推理路径） -->
+  <path class="edge-a" d="M960,946 L960,1250 L285,1250 L285,1300" marker-end="url(#ara)"/>
+  <text class="sh" x="975" y="1120" text-anchor="start">融合信号 signal (T, N) 期望收益</text>
+
+  <!-- ==================== ④ 回测层 ==================== -->
+  <rect class="grp" x="40" y="1280" width="2920" height="200" rx="10"/>
+  <text class="layer" x="70" y="1310" text-anchor="start">④ 回测层</text>
+  <text class="layer-en mono" x="150" y="1310" text-anchor="start">backtest/engine.py</text>
+
+  <rect class="bx" x="70" y="1330" width="430" height="100" rx="6"/>
+  <text class="tt" x="285" y="1354">信号 → 仓位</text>
+  <text class="sh" x="285" y="1376">top_quantile=0.2 · long_only</text>
+  <text class="sh" x="285" y="1396">weight_mode equal / signal_zscore</text>
+
+  <rect class="bx" x="540" y="1330" width="430" height="100" rx="6"/>
+  <text class="tt" x="755" y="1354">交易成本</text>
+  <text class="sh" x="755" y="1376">手续费 tc=2.0bps · 滑点 1.0bps</text>
+  <text class="sh" x="755" y="1396">仅换仓日计提 · 真实仓位换手</text>
+
+  <rect class="bx" x="1010" y="1330" width="430" height="100" rx="6"/>
+  <text class="tt" x="1225" y="1354">A股制度约束</text>
+  <text class="sh" x="1225" y="1376">涨跌停 mask（±10%/±20%）</text>
+  <text class="sh" x="1225" y="1396">T+1 · rebalance_freq · EMA 平滑</text>
+
+  <rect class="bx" x="1480" y="1330" width="480" height="100" rx="6"/>
+  <text class="tt" x="1720" y="1354">性能指标</text>
+  <text class="sh" x="1720" y="1376">Sharpe · MaxDD · Calmar · 年化</text>
+  <text class="sh" x="1720" y="1396">IC · ICIR · hit rate · turnover · RMSE</text>
+
+  <rect class="bx" x="2000" y="1330" width="480" height="100" rx="6"/>
+  <text class="tt" x="2240" y="1354">样本外 · walk-forward</text>
+  <text class="sh" x="2240" y="1376">滚动训练/测试 · OOS 公平对决</text>
+  <text class="sh" x="2240" y="1396">vs Ridge 线性基线</text>
+
+  <line class="edge" x1="500" y1="1380" x2="540" y2="1380" marker-end="url(#ar)"/>
+  <line class="edge" x1="970" y1="1380" x2="1010" y2="1380" marker-end="url(#ar)"/>
+  <line class="edge" x1="1440" y1="1380" x2="1480" y2="1380" marker-end="url(#ar)"/>
+  <line class="edge" x1="1960" y1="1380" x2="2000" y2="1380" marker-end="url(#ar)"/>
+
+  <line class="edge-a" x1="2240" y1="1430" x2="2240" y2="1510" marker-end="url(#ara)"/>
+
+  <!-- ==================== ⑤ 判定层 ==================== -->
+  <rect class="grp" x="40" y="1490" width="2920" height="120" rx="10"/>
+  <text class="layer" x="70" y="1520" text-anchor="start">⑤ Go/No-Go 判定</text>
+  <text class="layer-en" x="240" y="1520" text-anchor="start">判据冻结于 docs/EXPERIMENT_REGISTRY.md</text>
+
+  <rect class="bx" x="70" y="1540" width="700" height="46" rx="6"/>
+  <text class="tt" x="420" y="1563">GO 线：IC ≥ 0.04 且 t ≥ 2.0</text>
+
+  <rect class="bx" x="830" y="1540" width="700" height="46" rx="6"/>
+  <text class="tt" x="1180" y="1563">DAFT 现状：IC 0.035~0.037 · Sharpe +0.25（净）</text>
+
+  <rect class="bx-acc" x="1590" y="1540" width="700" height="46" rx="6"/>
+  <text class="tt-w" x="1940" y="1563">预判 NO-GO（弱于 Ridge 0.048）· 期限 2026-09-30</text>
+
+  <rect class="bx-soft" x="2350" y="1540" width="560" height="46" rx="6"/>
+  <text class="tt" x="2630" y="1563">推翻路径：长历史 · 消融 · 成本重测</text>
+
+  <!-- ==================== ⑥ 训练四阶段（构建路径） ==================== -->
+  <rect class="grp" x="40" y="1640" width="2920" height="170" rx="10"/>
+  <text class="layer" x="70" y="1670" text-anchor="start">⑥ 训练四阶段（构建路径）</text>
+  <text class="layer-en mono" x="290" y="1670" text-anchor="start">training/</text>
+
+  <rect class="bx" x="70" y="1690" width="680" height="92" rx="6"/>
+  <text class="tt" x="410" y="1712">Stage 1 · ExpertTrainer</text>
+  <text class="sh" x="410" y="1734">独立训练 · 各专家配 regime mask</text>
+  <text class="eq mono" x="410" y="1754">LR=1e-3  ·  expert_trainer.py</text>
+
+  <rect class="bx" x="790" y="1690" width="680" height="92" rx="6"/>
+  <text class="tt" x="1130" y="1712">Stage 2 · RouterTrainer</text>
+  <text class="sh" x="1130" y="1734">冻结专家 · 只训路由 + 记忆 + CDAP</text>
+  <text class="eq mono" x="1130" y="1754">δ=0.1 · temp 1.0→0.1  ·  router_trainer.py</text>
+
+  <rect class="bx" x="1510" y="1690" width="680" height="92" rx="6"/>
+  <text class="tt" x="1850" y="1712">Stage 3 · JointTrainer</text>
+  <text class="sh" x="1850" y="1734">全参数解冻 · 端到端联合微调</text>
+  <text class="eq mono" x="1850" y="1754">δ=1.0 · LR=1e-5  ·  joint_trainer.py</text>
+
+  <rect class="bx-soft" x="2230" y="1690" width="680" height="92" rx="6"/>
+  <text class="tt" x="2570" y="1712">Stage 4 · HardeningEngine</text>
+  <text class="sh" x="2570" y="1734">自适应硬化 · regime shift 检测 / 专家驱逐</text>
+  <text class="eq" x="2570" y="1754">禁用（接线未完成，见附录 C）</text>
+
+  <line class="edge" x1="750" y1="1736" x2="790" y2="1736" marker-end="url(#ar)"/>
+  <line class="edge" x1="1470" y1="1736" x2="1510" y2="1736" marker-end="url(#ar)"/>
+  <line class="edge" x1="2190" y1="1736" x2="2230" y2="1736" marker-end="url(#ar)"/>
+
+  <!-- ==================== ⑦ 入口 & 配置 ==================== -->
+  <rect class="grp" x="40" y="1840" width="2920" height="122" rx="10"/>
+  <text class="layer" x="70" y="1870" text-anchor="start">⑦ 入口 &amp; 配置</text>
+
+  <rect class="bx-soft" x="70" y="1886" width="1300" height="58" rx="5"/>
+  <text class="tt" x="720" y="1904" text-anchor="start">scripts/</text>
+  <text class="sh mono" x="770" y="1904" text-anchor="start">run_full_pipeline.py · run_stage1/2/3.py · run_walk_forward.py · run_baseline_ridge.py · run_backtest_only.py · training_loop.py · smoke_test.py</text>
+  <text class="sh" x="720" y="1926" text-anchor="start">全流程 / 分阶段训练 / walk-forward / Ridge 基线 / 回测 / 冒烟测试</text>
+
+  <rect class="bx-soft" x="1400" y="1886" width="760" height="58" rx="5"/>
+  <text class="tt" x="1780" y="1904" text-anchor="start">configs/</text>
+  <text class="sh mono" x="1840" y="1904" text-anchor="start">paper.yaml · small.yaml · hardening.yaml</text>
+  <text class="eq" x="1780" y="1926">参考死配置 · 实际参数在各脚本 DEFAULT_CONFIG</text>
+
+  <rect class="bx-soft" x="2190" y="1886" width="720" height="58" rx="5"/>
+  <text class="tt" x="2550" y="1904" text-anchor="start">portfolio/ · tests/ · utils/</text>
+  <text class="sh mono" x="2550" y="1926">markowitz.py（挂起）· 15 测试文件 · device/experiment/metrics</text>
+
+</svg>
+</div>
+</body>
+</html>
