@@ -119,28 +119,33 @@ class BacktestEngine:
         turnovers = torch.zeros(T_ret, device=device)
 
         for t in range(T_ret):
-            w_t = positions[t]                              # (N,)
-            r_t = returns[t]                                # (N,)
-            m_t = ret_mask[t]                               # (N,)
+            # 调仓频率(2026-08-16 实现): 仅每 rebalance_freq 根 bar 换仓,
+            # 其间持仓不变; 成本只在换仓日计提。
+            if t % self.rebalance_freq == 0:
+                w_t = positions[t]                              # (N,)
+                # Turnover (L1 distance from previous weights) — 真实仓位换手
+                turnover = (w_t - prev_positions).abs().sum()
+                turnovers[t] = turnover
+                # Transaction cost
+                tc = (self.tc_bps / 10000.0) * turnover
+                sl = (self.slippage_bps / 10000.0) * turnover
+                prev_positions = w_t
+            else:
+                w_t = prev_positions                            # 持仓不变
+                turnover = 0.0
+                tc, sl = 0.0, 0.0
+
+            r_t = returns[t]                                    # (N,)
+            m_t = ret_mask[t]                                   # (N,)
 
             # Portfolio return
             port_r = (w_t * r_t * m_t.float()).sum()
-            daily_returns[t] = port_r
-
-            # Turnover (L1 distance from previous weights)
-            turnover = (w_t - prev_positions).abs().sum()
-            turnovers[t] = turnover
-
-            # Transaction cost
-            tc = (self.tc_bps / 10000.0) * turnover
-            sl = (self.slippage_bps / 10000.0) * turnover
-            daily_returns[t] = daily_returns[t] - tc - sl
-
-            prev_positions = w_t
+            daily_returns[t] = port_r - tc - sl
 
         # --- Metrics ---
         metrics = self._compute_metrics(
-            daily_returns, signals[:-1], returns, ret_mask, metrics_list,
+            daily_returns, signals[:-1], returns, ret_mask, turnovers,
+            metrics_list,
         )
 
         # Add IC-specific summary
@@ -194,8 +199,13 @@ class BacktestEngine:
                 w[top_idx] = 1.0 / k
             else:
                 # Long top-k, short bottom-k
+                # 修复(2026-08-16): 空头候选必须排除 masked 资产。
+                # 旧实现用 (-s_t).topk(k), 而 s_t[masked]=-inf 取反后变 +inf,
+                # 停牌股反而优先被做空(已复现)。
                 _, top_idx = s_t.topk(k)
-                _, bot_idx = (-s_t).topk(k)   # bottom-k = worst signals
+                s_short = s_t.clone()
+                s_short[~m_t] = float("inf")     # masked 资产永不做空
+                _, bot_idx = s_short.topk(k, largest=False)  # 最差 k 个有效信号
                 w = torch.zeros(N, device=device)
                 w[top_idx] = 1.0 / k
                 w[bot_idx] = -1.0 / k
@@ -213,6 +223,7 @@ class BacktestEngine:
         signals: torch.Tensor,          # (T, N)
         returns: torch.Tensor,          # (T, N)
         mask: torch.Tensor,             # (T, N) bool
+        turnovers: Optional[torch.Tensor] = None,  # (T,) 真实仓位换手
         metrics_list: Optional[List[str]] = None,
     ) -> Dict[str, float]:
         """Compute all standard backtest metrics."""
@@ -223,7 +234,7 @@ class BacktestEngine:
 
         out: Dict[str, float] = {}
 
-        # Cumulative returns
+        # Cumulative returns (log space)
         cum_ret = torch.cumsum(daily_returns, dim=0)  # log-cumulative
 
         # Annualized return
@@ -237,7 +248,8 @@ class BacktestEngine:
         # Sharpe
         out["sharpe_ratio"] = self.sharpe_ratio(daily_returns, self.annualization)
 
-        # Max drawdown
+        # Max drawdown — 百分比口径(2026-08-16):
+        # equity = exp(对数累计收益), drawdown = equity/running_max - 1
         out["max_drawdown"] = self.max_drawdown(cum_ret)
 
         # Calmar = annual return / |max drawdown|
@@ -247,8 +259,13 @@ class BacktestEngine:
         # Hit rate
         out["hit_rate"] = hit_rate(signals, returns, mask)
 
-        # Turnover (mean per-step)
-        out["turnover"] = self._compute_turnover(signals, mask, daily_returns.size(0))
+        # Turnover — 真实仓位换手 (2026-08-16 修复口径):
+        # 之前上报的是原始信号 L1 代理, 与成本驱动因子(分位数仓位 Σ|Δw|)
+        # 不同刻度, 导致"换手降 7 倍"等归因失真。现在直接上报实际仓位换手。
+        if turnovers is not None and turnovers.numel() > 0:
+            out["turnover"] = turnovers.mean().item()
+        else:
+            out["turnover"] = self._compute_turnover(signals, mask, daily_returns.size(0))
 
         # RMSE of normalized predictions vs targets
         out["rmse"] = _compute_rmse(signals, returns, mask)
@@ -262,7 +279,11 @@ class BacktestEngine:
     def _compute_turnover(
         self, signals: torch.Tensor, mask: torch.Tensor, n_ret: int,
     ) -> float:
-        """Mean per-step turnover from signals."""
+        """Mean per-step turnover from signals. ⚠️ 已弃用(2026-08-16)。
+
+        这是原始信号的 L1 代理, 不是实际仓位换手 — 仅当 run() 未提供
+        真实仓位换手时回退使用。新代码请用 run() 上报的 turnover。
+        """
         T = min(signals.size(0) - 1, n_ret)
         if T < 2:
             return 0.0
@@ -286,11 +307,21 @@ class BacktestEngine:
 
     @staticmethod
     def max_drawdown(cumulative_returns: torch.Tensor) -> float:
-        """Maximum drawdown from peak (returns negative value, e.g. -0.25 = 25%)."""
+        """Maximum drawdown in percentage terms (2026-08-16 改口径)。
+
+        ``cumulative_returns`` 为对数累计收益; 转成净值曲线后计算:
+            equity = exp(cumsum(r)), dd = equity / running_max - 1
+        返回最深的负值(如 -0.25 = 回撤 25%), 可直接与年化收益对比。
+
+        Parameters
+        ----------
+        cumulative_returns : (T,) 对数累计收益曲线。
+        """
         if cumulative_returns.numel() < 2:
             return 0.0
-        running_max = cumulative_returns.cummax(dim=0).values
-        drawdowns = cumulative_returns - running_max   # ≤ 0
+        equity = torch.exp(cumulative_returns)
+        running_max = equity.cummax(dim=0).values
+        drawdowns = equity / running_max.clamp(min=1e-12) - 1.0   # ≤ 0
         return drawdowns.min().item()
 
     @staticmethod

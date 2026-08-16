@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 
 from daft.features.tensor_factors import TensorFactorEngine
+from daft.features.base_features import ensure_base_panel
 
 
 class RegimeFeatureExtractor(nn.Module):
@@ -490,7 +491,9 @@ class RegimeFeatureExtractor(nn.Module):
         ----------
         panel : Panel
             Raw market data panel with values of shape (T, N, F).
-            Minimum F = 5: [close, log_return, volume, volume_ratio, volatility_20].
+            接受 OHLCV 布局或基础布局
+            [close, log_return, volume, volume_ratio, volatility_20];
+            其他布局抛错(通道契约见 features/base_features.py)。
 
         Returns
         -------
@@ -498,6 +501,11 @@ class RegimeFeatureExtractor(nn.Module):
             Market state vectors. T = time steps, N = assets.
             Values at masked (non-tradable) positions are zeroed.
         """
+        # ── 通道契约: 统一为基础特征布局 (2026-08-16 修复) ──
+        # 修复前数据源的 OHLCV 列被直接当作 [close, log_return, ...] 读取,
+        # 所有 s_t 建立在错列上。这里先做唯一转换。
+        panel = ensure_base_panel(panel)
+
         T, N, F = panel.values.shape
         device = panel.device
         mask_2d = self._panel_mask_2d(panel)  # (T, N)

@@ -4,9 +4,18 @@ This file consolidates constants and fixtures that are used across
 multiple test modules, reducing duplication and ensuring consistency.
 """
 
+import sys
+from pathlib import Path
+
 import pytest
 import torch
 import torch.nn as nn
+
+# ── 源码守卫: 确保测试导入的是本仓库的 daft, 而不是 site-packages 里
+# editable 安装指向的其他克隆(历史事故: C:\Users\26843\daft 的旧版
+# 被导入, 导致测试在错误的代码上运行)。
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
@@ -16,6 +25,18 @@ from daft.models.ensemble import ExpertEnsemble
 from daft.models.experts import (
     TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
 )
+
+# ── 导入后校验: daft 必须来自本仓库的 src/ ──────────────────────────────
+import daft as _daft_pkg  # noqa: E402
+
+_daft_src = Path(_daft_pkg.__file__).resolve()
+if not _daft_src.is_relative_to(PROJECT_ROOT):
+    raise RuntimeError(
+        f"daft 导入自错误的路径: {_daft_src}\n"
+        f"预期在本仓库内: {PROJECT_ROOT / 'src'}\n"
+        "检查 editable 安装(pip show daft)是否指向了其他克隆, "
+        "或在 pyproject 里配置 pytest pythonpath=['src']。"
+    )
 
 
 # ── Shared constants ────────────────────────────────────────────────────

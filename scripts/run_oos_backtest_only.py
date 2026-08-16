@@ -21,6 +21,7 @@ from daft.models.ensemble import ExpertEnsemble
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.experiment import next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -34,10 +35,11 @@ def build_model():
         MomentumExpert(200,64), MomentumExpert(200,64),
     ])
     model = ExpertEnsemble(experts,
-        RegimeRouter(200,16,8,3,temperature=0.1,noisy_gating_std=0.0),
+        RegimeRouter(200,16,10,3,temperature=0.1,noisy_gating_std=0.0),
         KDAMarketMemory(128,64,200,bottleneck_ratio=4,use_route_modulation=True),
-        CrossDimensionAttention(8,128,64,3,64,modulation_strength=1.0),
-        HardeningEngine(8,8))
+        CrossDimensionAttention(10,128,64,3,64,modulation_strength=1.0),
+        HardeningEngine(10,10))
+    assert len(experts) == model.router.n_experts == model.cross_dim_attn.n_experts
     layer_proj = nn.ModuleDict({
         "l0": nn.Sequential(nn.Linear(200,128),nn.SiLU(),nn.Linear(128,64),nn.LayerNorm(64)),
         "l1": nn.Sequential(nn.Linear(200,128),nn.SiLU(),nn.Linear(128,64),nn.LayerNorm(64)),
@@ -98,8 +100,8 @@ def main():
             model.memory.detach_state()
     print(f"信号: {signals.shape}")
 
-    # 对齐切片
-    signals_test = signals[t_val_end-1:]           # (T-t_val_end, N)
+    # 对齐切片 (2026-08-16 统一 k→k+1, 末尾补哑元行)
+    signals_test = torch.cat([signals[t_val_end:], torch.zeros(1, N)], dim=0)  # (T-t_val_end, N)
     prices_test = panel.values[t_val_end:, :, 3]
     mask_test = panel.mask[t_val_end:]
     print(f"test: signals={signals_test.shape}, prices={prices_test.shape}")
@@ -128,6 +130,7 @@ def main():
 
     report = {
         "model": "DAFT_full_pipeline_OOS",
+        "alignment": "k→k+1 (2026-08-16 统一)",
         "data": {"source":"baostock","stocks":N,"start":args.start,"end":args.end,
                  "frequency":"daily","adjust":"forward","T":T,
                  "split":{"train":t_train_end,"val":t_val_end,"test":T}},
@@ -139,7 +142,9 @@ def main():
         "backtest": bt,
         "time_seconds": round(time.time()-t0, 1),
     }
-    out_path = OUTPUT_DIR / "full_pipeline_oos_report.json"
+    # 唯一产物名 (2026-08-16): 不再覆盖 run_full_pipeline_oos 的报告
+    out_path = next_exp_path(OUTPUT_DIR, "daft-oos-backtest-only")
+    report["experiment_id"] = out_path.stem
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\n    报告 → {out_path}")

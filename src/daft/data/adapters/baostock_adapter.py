@@ -81,21 +81,7 @@ class BaostockAdapter:
         all_data: Dict[str, pd.DataFrame] = {}
         try:
             for ticker in tickers:
-                rs = bs.query_history_k_data_plus(
-                    ticker,
-                    "date,open,high,low,close,volume",
-                    start_date=self.start_date,
-                    end_date=self.end_date,
-                    frequency=self.frequency,
-                    adjustflag=self.adjust,
-                )
-                if rs.error_code != "0":
-                    _logger.debug("Skip %s: %s", ticker, rs.error_msg)
-                    continue
-
-                rows = []
-                while rs.next():
-                    rows.append(rs.get_row_data())
+                rows = self._query_ticker(bs, ticker)
                 if not rows:
                     continue
 
@@ -114,6 +100,41 @@ class BaostockAdapter:
 
         # --- Align to common date index ---
         return self._to_panel(all_data)
+
+    # ------------------------------------------------------------------
+    def _query_ticker(self, bs, ticker: str, max_attempts: int = 3):
+        """Query one ticker with retries (baostock 批量拉取偶发瞬时失败,
+        2026-08-16 起增加重试, 避免 30 只股票池静默缩水到 23 只)。"""
+        import time as _time
+
+        last_err = ""
+        for attempt in range(max_attempts):
+            try:
+                rs = bs.query_history_k_data_plus(
+                    ticker,
+                    "date,open,high,low,close,volume",
+                    start_date=self.start_date,
+                    end_date=self.end_date,
+                    frequency=self.frequency,
+                    adjustflag=self.adjust,
+                )
+                if rs.error_code != "0":
+                    last_err = rs.error_msg
+                else:
+                    rows = []
+                    while rs.next():
+                        rows.append(rs.get_row_data())
+                    if rows:
+                        return rows
+                    last_err = "empty result"
+            except Exception as e:  # noqa: BLE001 — 重试后仍失败再跳过
+                last_err = repr(e)
+
+            if attempt < max_attempts - 1:
+                _time.sleep(1.0 * (attempt + 1))
+
+        _logger.warning("Skip %s after %d attempts: %s", ticker, max_attempts, last_err)
+        return None
 
     # ------------------------------------------------------------------
     def _to_panel(self, data_dict: Dict) -> Panel:

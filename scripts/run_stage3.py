@@ -93,7 +93,7 @@ def build_experts() -> nn.ModuleList:
 
 def build_ensemble(experts: nn.ModuleList) -> ExpertEnsemble:
     router = RegimeRouter(
-        input_dim=200, latent_dim=16, n_experts=8, top_k=3,
+        input_dim=200, latent_dim=16, n_experts=10, top_k=3,
         temperature=0.1, noisy_gating_std=0.0,
     )
     memory = KDAMarketMemory(
@@ -101,11 +101,15 @@ def build_ensemble(experts: nn.ModuleList) -> ExpertEnsemble:
         bottleneck_ratio=4, use_route_modulation=True,
     )
     cdap = CrossDimensionAttention(
-        n_experts=8, d_k=128, d_v=64, n_layers=3,
+        n_experts=10, d_k=128, d_v=64, n_layers=3,
         joint_dim=64, modulation_strength=1.0,
     )
     hardening = HardeningEngine(
-        n_regimes=8, n_experts=8, threshold=100,
+        n_regimes=10, n_experts=10, threshold=100,
+    )
+    assert len(experts) == router.n_experts == cdap.n_experts, (
+        f"n_experts 不一致: experts={len(experts)}, "
+        f"router={router.n_experts}, cdap={cdap.n_experts}"
     )
     return ExpertEnsemble(experts, router, memory, cdap, hardening)
 

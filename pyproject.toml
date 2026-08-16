@@ -79,3 +79,6 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+# 强制导入本仓库的 src,而不是 site-packages 里 editable 安装指向的
+# 其他克隆(历史事故: C:\Users\26843\daft 的旧版被导入导致测试测错代码)
+pythonpath = ["src"]

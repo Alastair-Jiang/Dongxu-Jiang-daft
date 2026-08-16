@@ -96,7 +96,7 @@ DAFT formalizes these intuitions as a trainable, three-way modulation protocol.
 ```mermaid
 flowchart TD
     MD["Market Data<br/>(OHLCV, min)"]
-    FE["Feature Engine<br/>• 213 base factors<br/>• Regime features<br/>• FFT spectral<br/>• s_t ∈ R²⁰⁰"]
+    FE["Feature Engine<br/>• 200-dim s_t<br/>• Regime features<br/>• FFT spectral(未接线)<br/>• s_t ∈ R²⁰⁰"]
     MD --> FE
 
     L0["L0: Raw Data<br/>(Price/Volume)"]
@@ -141,7 +141,7 @@ flowchart TD
 
 The raw market state vector $\mathbf{s}_t \in \mathbb{R}^{200}$ is projected into a low-dimensional latent regime space:
 
-$$\mathbf{z}_t = \text{LayerNorm}\big(W_{\text{down}} \cdot \text{SiLU}(W_{\text{up}} \cdot \mathbf{s}_t)\big) \in \mathbb{R}^{16}$$
+$$\mathbf{z}_t = \text{LayerNorm}\big(W_{\text{up}} \cdot \text{SiTU}(W_{\text{down}} \cdot \mathbf{s}_t)\big) \in \mathbb{R}^{16}$$
 
 Expert routing with temperature-scaled softmax:
 
@@ -159,7 +159,7 @@ Zero auxiliary loss. Bias adjustment based on activation frequency quantiles.
 |-----------|-------|-------------|
 | `input_dim` | 200 | Market state vector dimension |
 | `latent_dim` | 16 | Regime latent space dimension |
-| `n_experts` | 8 | Number of strategy experts |
+| `n_experts` | 10 | Number of strategy experts (5 类 × 2 实例) |
 | `top_k` | 3 | Experts activated per forward pass |
 | `τ_train` | 1.0 | Temperature during training (soft routing) |
 | `τ_hardened` | 0.1 | Temperature after hardening (near-discrete) |
@@ -219,7 +219,7 @@ Three information streams — routing distribution $\mathbf{p}_t$, memory state 
 **Joint Space Projection**:
 
 $$\mathbf{e} = f_{\text{expert} \to \text{joint}}(\mathbf{p}_t) \in \mathbb{R}^{64}$$
-$$\mathbf{m} = f_{\text{memory} \to \text{joint}}(\text{flatten}(M_t)) \in \mathbb{R}^{64}$$
+$$\mathbf{m} = f_{\text{memory} \to \text{joint}}(\text{mean-pool}_{d_k}(M_t)) \in \mathbb{R}^{64}$$
 $$\mathbf{d} = f_{\text{depth} \to \text{joint}}(\text{concat}(h_0, h_1, h_2)) \in \mathbb{R}^{64}$$
 
 **Fusion via Mutual Modulation**:
@@ -249,6 +249,11 @@ $$h_t^{\text{fused}} = \sum_{k=0}^{2} w_t^{(k)} \cdot h_k$$
 **Inspiration**: K3's 3:1 KDA-to-full-attention static ratio → generalized as data-driven dynamic routing
 
 **Core Idea**: After training, frequently traversed $(regime, expert\_pattern)$ tuples are cached. Routine regimes follow $\mathcal{O}(1)$ fast paths; novel regimes fall back to full computation.
+
+> ⚠️ 2026-08-16: AHM 目前是**研究性实现, 所有训练/评估路径默认禁用**
+> (ensemble.py 内注)。fast path 仅跳过 CDAP 三个投影(专家照常全算),
+> "60-80% 延迟下降"的声称暂不成立; `detect_regime_shift` /
+> `evict_stale_entries` 暂无调用方。启用前需先完成信号验证与接线。
 
 **Hardening Criterion**:
 
@@ -283,7 +288,7 @@ Three cached vectors for the hardened $(regime, expert\_pattern)$ combination.
 
 | K3 Component | K3 Implementation | DAFT Mapping | Key Modification |
 |---|---|---|---|
-| **Stable LatentMoE** | 896 experts, 16 active, latent-space routing with Quantile Balancing | 8 strategy experts, top-3 active, regime latent space ($\mathbb{R}^{16}$) | Financial expert semantics: trend, reversal, volatility, event-driven |
+| **Stable LatentMoE** | 896 experts, 16 active, latent-space routing with Quantile Balancing | 10 strategy experts, top-3 active, regime latent space ($\mathbb{R}^{16}$) | Financial expert semantics: trend, reversal, volatility, event-driven, momentum |
 | **KDA (Kimi Delta Attention)** | Per-channel forget gates ($\boldsymbol{\alpha}_t$), delta-rule state update ($S_t$), 3:1 KDA-to-MLA layer ratio | Per-slot forget gates, route-modulated forgetting ($\boldsymbol{\alpha}'_t$), fixed-size market memory ($M_t \in \mathbb{R}^{128 \times 64}$) | Router signal modulates forget gate; NoPE by design (market time is non-uniform) |
 | **AttnRes (Attention Residuals)** | Cross-layer attention over hidden states $[h_0, \ldots, h_{l-1}]$ | Cross-layer retrieval over factor hierarchy (L0 raw → L1 base → L2 composite) | Depth weights are memory-state-aware (CDAP connection) |
 | **SiTU Activation** | $\sigma(x) \odot \tanh(x)$, natural output bound $[-1,1]$ | Expert output activation for natural weight alignment | Ensures expert signals are magnitude-comparable before gated fusion |
@@ -295,24 +300,23 @@ Three cached vectors for the hardened $(regime, expert\_pattern)$ combination.
 
 ```bash
 # Clone
-git clone https://github.com/Dongxu-Jiang/daft.git
-cd daft
+git clone https://github.com/Alastair-Jiang/Dongxu-Jiang-daft.git
+cd Dongxu-Jiang-daft
 
 # Install (CPU)
 pip install -e ".[dev]"
 
-# Install (GPU / Apple M-series)
-pip install -e ".[gpu]"    # CUDA
-pip install -e ".[mps]"    # Apple Silicon
+# Smoke test: synthetic data
+python scripts/smoke_test.py
 
-# Smoke test: synthetic 200 stocks × 500 days, ~30 seconds
-make paper CONFIG=configs/small.yaml
+# 快速训练管线(合成数据)
+python scripts/run_stage1.py && python scripts/run_stage2.py && python scripts/run_stage3.py
 
-# Full experiment
-make paper CONFIG=configs/paper.yaml
+# 真实数据基线(需 pip install baostock)
+python scripts/run_baseline_ridge_real.py --stocks 30
 
-# Hardening analysis
-make paper CONFIG=configs/hardening.yaml
+# 真实数据 DAFT 严格样本外(默认 quick, 约 2 小时 CPU)
+python scripts/run_full_pipeline_oos.py --stocks 30
 ```
 
 ---
@@ -344,7 +348,12 @@ make paper CONFIG=configs/hardening.yaml
 | NVIDIA GPU (≥ 8 GB VRAM) | Full training on ≥ 500 stocks, hyperparameter sweeps |
 | CPU-only (16 GB) | Inference, smoke tests, small-scale training |
 
-The model has **< 200K total parameters** (deliberately lightweight for research iteration).
+The model has **~315K total parameters** for the core ensemble (10 experts; ≈417K including the 3-layer feature projectors), deliberately lightweight for research iteration.
+
+> ⚠️ 2026-08-16 修复说明: 早前版本声称 "<200K 参数"与"213 个基础因子"
+> 均不准确(实测 8 专家 28.0 万 / 10 专家 31.5 万; 手工因子注册表为 35 个
+> 且未接入训练管线)。快速上手命令中的 `make paper` 不存在, 实际入口是
+> `python scripts/run_*.py`(见各脚本 docstring)。
 
 ---
 
@@ -543,7 +552,7 @@ To isolate the contribution of each architectural component, we disable one at a
 
 2. **Mid-frequency only**. The architecture assumes minute- to hour-scale decision horizons. Extending to tick-level (HFT) or monthly (factor investing) requires architectural adaptation.
 
-3. **8 experts may underfit regime diversity**. K3 uses 896 experts; DAFT uses 8. This is a deliberate trade-off for training feasibility on consumer hardware, but may miss nuanced market sub-regimes.
+3. **10 experts may underfit regime diversity**. K3 uses 896 experts; DAFT uses 10. This is a deliberate trade-off for training feasibility on consumer hardware, but may miss nuanced market sub-regimes.
 
 4. **Hardening assumes regime stationarity within cache window**. If markets undergo a structural break (e.g., T+0 reform, circuit breaker introduction), cached fast paths may become stale. The entropy-based degradation trigger is a heuristic — it can fail if the break is gradual rather than abrupt.
 

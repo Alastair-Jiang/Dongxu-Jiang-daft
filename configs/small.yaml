@@ -1,5 +1,7 @@
 # DAFT Smoke Test Configuration
 # Synthetic data, minimal resources — runs in ~30 seconds on CPU/MPS
+# ⚠️ 2026-08-16: 本 yaml 目前未被任何脚本加载(死配置), 保留作参考;
+#    实际配置在各脚本的 DEFAULT_CONFIG 字典里。
 # Usage: make paper CONFIG=configs/small.yaml
 
 experiment:
@@ -20,7 +22,7 @@ data:
 
 model:
   # Expert pool
-  n_experts: 8
+  n_experts: 10
   top_k: 3
   experts:
     trend:
@@ -64,7 +66,7 @@ model:
     threshold: 100              # θ: min observations before hardening
     min_confidence: 0.95        # ρ: min confidence ratio
     entropy_multiplier: 2.0     # λ: regime shift detection sensitivity
-    n_regimes_tracked: 8
+    n_regimes_tracked: 10
 
 training:
   stage1:                       # Independent expert training

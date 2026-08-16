@@ -24,7 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from daft.data.panel import Panel
 from daft.data.loaders import DataLoader
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert
+from daft.models.experts import (
+    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
+)
 from daft.models.router import RegimeRouter
 from daft.models.memory import KDAMarketMemory
 from daft.models.cross_dim_attn import CrossDimensionAttention
@@ -116,7 +118,7 @@ for expert in experts:
 banner("Test 3: Regime Router (Stable LatentMoE)")
 
 router = RegimeRouter(
-    input_dim=200, latent_dim=16, n_experts=8,
+    input_dim=200, latent_dim=16, n_experts=10,
     top_k=3, temperature=1.0, noisy_gating_std=0.1,
 ).to(DEVICE)
 
@@ -128,7 +130,7 @@ all_pass &= check(f"z_t shape = (B,16): {z_t.shape}", z_t.shape == (BATCH_SIZE, 
 all_pass &= check("Top-K probs sum ~ 1.0", torch.allclose(
     topk_probs.sum(dim=-1), torch.ones(BATCH_SIZE), atol=1e-5))
 all_pass &= check("All top-K probs > 0", (topk_probs > 0).all().item())
-all_pass &= check(f"full_probs shape = (B,8): {full_probs.shape}", full_probs.shape == (BATCH_SIZE, 8))
+all_pass &= check(f"full_probs shape = (B,10): {full_probs.shape}", full_probs.shape == (BATCH_SIZE, 10))
 all_pass &= check("Full probs sum ~ 1.0", torch.allclose(
     full_probs.sum(dim=-1), torch.ones(BATCH_SIZE), atol=1e-5))
 
@@ -163,12 +165,12 @@ all_pass &= check("Retrieved values are finite", retrieved.isfinite().all().item
 banner("Test 5: Cross-Dimension Attention Protocol (CDAP)")
 
 cdap = CrossDimensionAttention(
-    n_experts=8, d_k=128, d_v=64, n_layers=3,
+    n_experts=10, d_k=128, d_v=64, n_layers=3,
     joint_dim=64, modulation_strength=1.0,
 ).to(DEVICE)
 
 # Mock inputs
-mock_routing = torch.randn(BATCH_SIZE, 8).softmax(dim=-1)
+mock_routing = torch.randn(BATCH_SIZE, 10).softmax(dim=-1)
 mock_memory = M_t.expand(BATCH_SIZE, -1, -1).clone()
 mock_layers = [
     torch.randn(BATCH_SIZE, 64),
@@ -179,7 +181,7 @@ mock_layers = [
 routing_mod, mem_gate, depth_weights, fused = cdap(
     mock_routing, mock_memory, mock_layers)
 
-all_pass &= check(f"routing_mod shape = (B,8): {routing_mod.shape}", routing_mod.shape == (BATCH_SIZE, 8))
+all_pass &= check(f"routing_mod shape = (B,10): {routing_mod.shape}", routing_mod.shape == (BATCH_SIZE, 10))
 all_pass &= check(f"mem_gate shape = (B,128): {mem_gate.shape}", mem_gate.shape == (BATCH_SIZE, 128))
 all_pass &= check(f"depth_weights shape = (B,3): {depth_weights.shape}", depth_weights.shape == (BATCH_SIZE, 3))
 all_pass &= check(f"fused shape = (B,64): {fused.shape}", fused.shape == (BATCH_SIZE, 64))
@@ -195,7 +197,7 @@ all_pass &= check("mem_gate in (0, 1)", (mem_gate >= 0).all() and (mem_gate <= 1
 banner("Test 6: Adaptive Hardening Mechanism (AHM)")
 
 hardening = HardeningEngine(
-    n_regimes=8, n_experts=8,
+    n_regimes=10, n_experts=10,
     threshold=10, min_confidence=0.5, entropy_multiplier=2.0,
 )
 
@@ -203,8 +205,8 @@ hardening = HardeningEngine(
 fast_count = 0
 slow_count = 0
 for i in range(200):
-    pattern = torch.tensor([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0])
-    noise = torch.rand(8) * 0.2
+    pattern = torch.tensor([0.5, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    noise = torch.rand(10) * 0.2
     routing = (pattern + noise).softmax(dim=0)
     if hardening.should_use_fast_path(0, routing):
         _ = hardening.get_cached_weights(0, routing)
@@ -221,7 +223,7 @@ all_pass &= check("Cache entries created", stats['n_cached_patterns'] > 0)
 all_pass &= check("Fast path used after warmup", stats['fast_path_ratio'] > 0)
 
 # Regime shift detection
-anomalous = torch.ones(8) / 8  # max entropy
+anomalous = torch.ones(10) / 10  # max entropy
 for _ in range(30):
     hardening.should_use_fast_path(0, anomalous)
 shift = hardening.detect_regime_shift()
@@ -236,19 +238,21 @@ banner("Test 7: End-to-End Ensemble + Gradient Flow")
 
 experts_full = nn.ModuleList([
     TrendExpert(input_dim=200, hidden_dim=64),
-    ReversalExpert(input_dim=200, hidden_dim=64),
-    VolatilityExpert(input_dim=200, hidden_dim=48),
-    EventExpert(input_dim=200, hidden_dim=48),
     TrendExpert(input_dim=200, hidden_dim=64),
     ReversalExpert(input_dim=200, hidden_dim=64),
+    ReversalExpert(input_dim=200, hidden_dim=64),
+    VolatilityExpert(input_dim=200, hidden_dim=48),
     VolatilityExpert(input_dim=200, hidden_dim=48),
     EventExpert(input_dim=200, hidden_dim=48),
+    EventExpert(input_dim=200, hidden_dim=48),
+    MomentumExpert(input_dim=200, hidden_dim=64),
+    MomentumExpert(input_dim=200, hidden_dim=64),
 ])
 
-router_full = RegimeRouter(input_dim=200, latent_dim=16, n_experts=8, top_k=3)
+router_full = RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3)
 memory_full = KDAMarketMemory(d_k=128, d_v=64, d_feature=200, use_route_modulation=True)
-cdap_full = CrossDimensionAttention(n_experts=8, d_k=128, d_v=64, n_layers=3, joint_dim=64)
-hardening_full = HardeningEngine(n_regimes=8, n_experts=8, threshold=100)
+cdap_full = CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3, joint_dim=64)
+hardening_full = HardeningEngine(n_regimes=10, n_experts=10, threshold=100)
 
 ensemble = ExpertEnsemble(
     experts=experts_full, router=router_full,

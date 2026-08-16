@@ -21,7 +21,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from daft.data.panel import Panel
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, rank_ic_by_timestep
 
 
 class JointTrainer:
@@ -79,18 +79,20 @@ class JointTrainer:
         self.model.router.temperature = 0.1   # near-discrete routing at inference temp
 
         # --- Build s_t and targets ---
-        train_s, train_t, train_m = self._build_dataset(train_panel)
-        val_s, val_t, val_m = self._build_dataset(val_panel)
+        train_s, train_t, train_m, train_tidx = self._build_dataset(train_panel)
+        val_s, val_t, val_m, val_tidx = self._build_dataset(val_panel)
 
         # --- Move to device ---
         self.layer_proj.to(self.device)
         self.model.to(self.device)
 
-        # --- Data loaders ---
-        train_ds = TensorDataset(train_s, train_t, train_m)
-        val_ds = TensorDataset(val_s, val_t, val_m)
-        train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
-        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
+        # --- Data loaders (按日对齐批次, 2026-08-16) ---
+        N_stocks = train_panel.N
+        eff_batch = max(N_stocks, (batch_size // N_stocks) * N_stocks)
+        train_ds = TensorDataset(train_s, train_t, train_m, train_tidx)
+        val_ds = TensorDataset(val_s, val_t, val_m, val_tidx)
+        train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=False)
+        val_loader = DataLoader(val_ds, batch_size=eff_batch, shuffle=False)
 
         # --- Parameter groups: experts get lower LR ---
         expert_params = []
@@ -130,13 +132,13 @@ class JointTrainer:
             # ---- Validate ----
             self.model.eval()
             self.layer_proj.eval()
-            val_loss, val_signals, val_targets = self._run_epoch(
+            val_loss, val_signals, val_targets, val_tidx_c = self._run_epoch(
                 val_loader, None, False, return_predictions=True,
             )
 
-            val_ic = rank_info_coefficient(
-                val_signals.squeeze(-1), val_targets.squeeze(-1), None,
-                per_timestep=True,
+            # 逐时步截面 rank IC (2026-08-16 修复: 旧实现为退化指标)
+            val_ic = rank_ic_by_timestep(
+                val_signals.squeeze(-1), val_targets.squeeze(-1), val_tidx_c,
             )
             val_ic_summary = ic_summary(val_ic) if val_ic.numel() > 0 else {
                 "ic_mean": 0.0, "ic_std": 0.0, "icir": 0.0,
@@ -215,14 +217,16 @@ class JointTrainer:
         s_2d = s_aligned.reshape(T * N, 200)
         t_1d = targets.reshape(T * N, 1)
         m_1d = panel.mask[:-1].reshape(T * N, 1)
+        t_idx = torch.arange(T, device=s_2d.device).repeat_interleave(N)
 
         valid = m_1d.squeeze(-1)
         if valid.any():
             s_2d = s_2d[valid]
             t_1d = t_1d[valid]
             m_1d = m_1d[valid]
+            t_idx = t_idx[valid]
 
-        return s_2d, t_1d, m_1d
+        return s_2d, t_1d, m_1d, t_idx
 
     # ------------------------------------------------------------------
     def _run_epoch(
@@ -239,10 +243,11 @@ class JointTrainer:
         n_batches = 0
         all_signals = []
         all_targets = []
+        all_tidx = []
 
         self.model.memory.reset_state(1, self.device)
 
-        for s_b, t_b, m_b in loader:
+        for s_b, t_b, m_b, ti_b in loader:
             s_b = s_b.to(self.device)
             t_b = t_b.to(self.device)
             m_b = m_b.to(self.device)
@@ -304,6 +309,7 @@ class JointTrainer:
                 if return_predictions:
                     all_signals.append(signal.cpu())
                     all_targets.append(t_b.cpu())
+                    all_tidx.append(ti_b.cpu())
 
             self.model.memory.detach_state()
             n_batches += 1
@@ -314,7 +320,8 @@ class JointTrainer:
         if return_predictions:
             signals = torch.cat(all_signals, dim=0) if all_signals else torch.zeros(0, 1)
             targets = torch.cat(all_targets, dim=0) if all_targets else torch.zeros(0, 1)
-            return avg_loss, signals, targets
+            t_idx = torch.cat(all_tidx, dim=0) if all_tidx else torch.zeros(0, dtype=torch.long)
+            return avg_loss, signals, targets, t_idx
 
         return avg_loss, avg_entropy
 

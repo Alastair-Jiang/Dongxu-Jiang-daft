@@ -46,6 +46,7 @@ from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints" / "oos"
@@ -186,7 +187,8 @@ def main():
     s1_hist = s1.train_all(epochs=cfg["stage1"]["epochs"],
                            batch_size=cfg["stage1"]["batch_size"],
                            lr=cfg["stage1"]["lr"], verbose=True)
-    print(f"      Stage 1 耗时: {time.time()-t0:.1f}s")
+    stage1_seconds = time.time() - t0
+    print(f"      Stage 1 耗时: {stage1_seconds:.1f}s")
 
     # ---------- 4. Stage 2 + 3 (train + val only) ----------
     print("\n[4/6] Stage 2 + 3: 路由/记忆/CDAP + 联合微调 (仅 train+val 段)...")
@@ -218,14 +220,16 @@ def main():
     print(f"      信号: {signals_full.shape}")
 
     # Test-segment signals & prices
-    # 对齐规则:signals_full[t] 预测 t+1 的收益,故 prices 段取 [t_test_start+1:]
-    # signals_full 长度 = T-1(signals[t] → prices[t+1]);t_test_start = t_val_end - 1
-    # 则 signals_test = signals_full[t_val_end-1:] 覆盖 [t_val_end-1, T-2],共 T-t_val_end 行
-    # 对应的 prices 段 = panel.values[t_val_end:] 覆盖 [t_val_end, T-1],共 T-t_val_end 行
-    t_test_start = t_val_end - 1
-    signals_test = signals_full[t_test_start:]          # (T - t_val_end, N)
-    prices_test = panel.values[t_val_end:, :, 3]        # (T - t_val_end, N)  ← 修正
-    mask_test = panel.mask[t_val_end:]                  # (T - t_val_end, N)  ← 修正
+    # 对齐约定(2026-08-16 统一为 k→k+1): signals_full[t] 预测 p[t+1]-p[t]。
+    # 配对 (signals_full[t], p[t+1]-p[t]) for t ∈ [t_val_end, T-2]。
+    # engine.run 要求 len(signals)==len(prices), 因此末尾补一行哑元
+    # (会被 signals[:-1] 丢弃)。
+    signals_test = torch.cat([
+        signals_full[t_val_end:],                         # (T-1-t_val_end, N)
+        torch.zeros(1, N),                                # 哑元行(被丢弃)
+    ], dim=0)                                             # (T-t_val_end, N)
+    prices_test = panel.values[t_val_end:, :, 3]          # (T-t_val_end, N)
+    mask_test = panel.mask[t_val_end:]                    # (T-t_val_end, N)
     print(f"      test 段信号: {signals_test.shape}, prices: {prices_test.shape}")
 
     # ---------- 6. Backtest on TEST ONLY (same costs as Ridge) ----------
@@ -237,9 +241,8 @@ def main():
     bt = engine.run(signals_test, prices_test, mask=mask_test)
 
     # IC on test segment (cross-sectional, per-timestep)
-    # signals_pad[t] 与 returns_test[t] 对齐:returns_test = log_p[1:]-log_p[:-1] 对 prices_test
-    # signals_test 已有 T-t_val_end 行,与 returns_test 行数一致
-    signals_pad = signals_test                            # (T_test, N)
+    # 对齐(2026-08-16 统一 k→k+1): returns_test[t] = p[t_val_end+t+1]-p[t_val_end+t],
+    # signals_test[:-1][t] = signals_full[t_val_end+t] 恰好预测该收益。
     log_pt = torch.log(prices_test.clamp(min=1e-8))
     returns_test = (log_pt[1:] - log_pt[:-1])             # (T_test-1, N)
     ic_series = rank_info_coefficient(signals_test[:-1], returns_test, mask_test[1:], per_timestep=True)
@@ -259,7 +262,9 @@ def main():
 
     # ---------- Save ----------
     report = {
+        "experiment_id": None,  # 下方写入
         "model": "DAFT_full_pipeline",
+        "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,
             "start": args.start, "end": args.end, "frequency": "daily",
@@ -268,8 +273,9 @@ def main():
         "split": {"train": t_train_end, "val": t_val_end, "test": T,
                   "test_steps": test_panel.T},
         "config": cfg,
+        "config_hash": config_hash(cfg),
         "training": {
-            "stage1_seconds": s1_hist and 0,
+            "stage1_seconds": round(stage1_seconds, 1),
             "experts_trained": len(s1_hist),
         },
         "out_of_sample": {
@@ -282,11 +288,13 @@ def main():
         "memory_warmup": "causal sequential warmup over full panel before test",
         "time_seconds": round(time.time() - t_total, 1),
     }
-    out_path = OUTPUT_DIR / "full_pipeline_oos_report.json"
+    # 唯一产物名 (2026-08-16): 不再用固定文件名覆盖历史报告
+    out_path = next_exp_path(OUTPUT_DIR, "daft-oos")
+    report["experiment_id"] = out_path.stem
     with open(out_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"\n    报告 → {out_path}")
-    print("    对比基准 → outputs/baseline_ridge_real_report.json")
+    print("    对比基准 → outputs/EXP-*-ridge-real.json (最新一条 Ridge 同口径报告)")
 
 
 if __name__ == "__main__":

@@ -94,7 +94,7 @@ def build_experts() -> nn.ModuleList:
 def build_ensemble(experts: nn.ModuleList, device: torch.device) -> ExpertEnsemble:
     """Assemble the full DAFT model around pre-built experts."""
     router = RegimeRouter(
-        input_dim=200, latent_dim=16, n_experts=8, top_k=3,
+        input_dim=200, latent_dim=16, n_experts=10, top_k=3,
         temperature=1.0, noisy_gating_std=0.1,
     )
     memory = KDAMarketMemory(
@@ -102,12 +102,18 @@ def build_ensemble(experts: nn.ModuleList, device: torch.device) -> ExpertEnsemb
         bottleneck_ratio=4, use_route_modulation=True,
     )
     cdap = CrossDimensionAttention(
-        n_experts=8, d_k=128, d_v=64, n_layers=3,
+        n_experts=10, d_k=128, d_v=64, n_layers=3,
         joint_dim=64, modulation_strength=0.1,
     )
     hardening = HardeningEngine(
-        n_regimes=8, n_experts=8, threshold=100,
+        n_regimes=10, n_experts=10, threshold=100,
         min_confidence=0.95, entropy_multiplier=2.0,
+    )
+    # 通道一致性守卫: 专家池与路由/CDAP 的专家数必须一致
+    # (2026-08-16 修复 n_experts 8 vs 10 混用导致的 forward 崩溃)
+    assert len(experts) == router.n_experts == cdap.n_experts, (
+        f"n_experts 不一致: experts={len(experts)}, "
+        f"router={router.n_experts}, cdap={cdap.n_experts}"
     )
     return ExpertEnsemble(experts, router, memory, cdap, hardening)
 
