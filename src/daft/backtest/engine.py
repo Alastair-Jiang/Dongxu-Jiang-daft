@@ -43,6 +43,13 @@ class BacktestEngine:
         # Position params
         self.top_quantile = self.config.get("top_quantile", 0.2)
         self.long_only = self.config.get("long_only", True)
+        # 仓位模式(2026-08-16 新增): "equal" = top-k 等权(原行为);
+        # "signal_zscore" = 按信号 z 分数加权(候选内)
+        self.weight_mode = self.config.get("weight_mode", "equal")
+
+        # 成交约束(2026-08-16 新增): True → 停牌/涨跌停日(mask=False)
+        # 禁止开平仓(已持仓维持昨收、不计换手成本)。
+        self.respect_mask_no_trade = self.config.get("respect_mask_no_trade", True)
 
         # Other
         self.annualization = self.config.get("annualization", 252)
@@ -85,6 +92,13 @@ class BacktestEngine:
         -----
         Works on CPU or GPU. All computations are vectorized over assets
         but sequential over time (due to transaction costs).
+
+        交易制度约束(2026-08-16):
+        - T+1: 日线收盘-收盘持仓结构下, t 日收盘建立的头寸最早于 t+1 日
+          收盘平仓(持有满 1 日), A 股 T+1 约束结构性满足。
+        - 停牌/涨跌停: mask=False 的交易日既不能开仓也不能平仓 —
+          respect_mask_no_trade=True(默认)时该资产持仓维持昨收、不计换手;
+          信号选择阶段亦排除 masked 资产建仓。
         """
         T, N = signals.shape
         if mask is None:
@@ -122,7 +136,15 @@ class BacktestEngine:
             # 调仓频率(2026-08-16 实现): 仅每 rebalance_freq 根 bar 换仓,
             # 其间持仓不变; 成本只在换仓日计提。
             if t % self.rebalance_freq == 0:
-                w_t = positions[t]                              # (N,)
+                w_t = positions[t].clone()                     # (N,)
+                # 成交约束(2026-08-16 新增): 停牌/涨跌停日(mask=False)无法
+                # 开仓也无法平仓 — 该资产的持仓维持昨收, 不产生换手与成本。
+                # 注: 信号选择阶段已把 masked 资产排除在新建仓之外; 这里
+                # 补的是"已持仓资产在跌停日卖不掉"这一半。
+                if self.respect_mask_no_trade:
+                    blocked = ~ret_mask[t]
+                    if blocked.any():
+                        w_t[blocked] = prev_positions[blocked]
                 # Turnover (L1 distance from previous weights) — 真实仓位换手
                 turnover = (w_t - prev_positions).abs().sum()
                 turnovers[t] = turnover
@@ -193,10 +215,13 @@ class BacktestEngine:
             k = max(1, int(n_valid * self.top_quantile))
 
             if self.long_only:
-                # Top-k by signal → equal weight
                 _, top_idx = s_t.topk(k)
                 w = torch.zeros(N, device=device)
-                w[top_idx] = 1.0 / k
+                if self.weight_mode == "signal_zscore":
+                    z = _zscore_pos(s_t[top_idx])
+                    w[top_idx] = z
+                else:
+                    w[top_idx] = 1.0 / k
             else:
                 # Long top-k, short bottom-k
                 # 修复(2026-08-16): 空头候选必须排除 masked 资产。
@@ -207,8 +232,14 @@ class BacktestEngine:
                 s_short[~m_t] = float("inf")     # masked 资产永不做空
                 _, bot_idx = s_short.topk(k, largest=False)  # 最差 k 个有效信号
                 w = torch.zeros(N, device=device)
-                w[top_idx] = 1.0 / k
-                w[bot_idx] = -1.0 / k
+                if self.weight_mode == "signal_zscore":
+                    z_long = _zscore_pos(s_t[top_idx])
+                    z_short = _zscore_pos(-s_t[bot_idx])
+                    w[top_idx] = z_long
+                    w[bot_idx] = -z_short
+                else:
+                    w[top_idx] = 1.0 / k
+                    w[bot_idx] = -1.0 / k
 
             positions[t] = w
 
@@ -339,6 +370,19 @@ class BacktestEngine:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _zscore_pos(x: torch.Tensor) -> torch.Tensor:
+    """信号 → 正仓位权重: softplus(z-score) 归一化。
+
+    候选内权重单调于信号且恒为正(softplus 无零点), 用于
+    weight_mode="signal_zscore" 的分数仓位。
+    """
+    mu = x.mean()
+    sd = x.std().clamp(min=1e-8)
+    z = (x - mu) / sd
+    pos = torch.nn.functional.softplus(z)
+    return pos / pos.sum().clamp(min=1e-12)
+
 
 def _compute_rmse(
     predictions: torch.Tensor,  # (T, N)
