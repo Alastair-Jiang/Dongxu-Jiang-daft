@@ -53,18 +53,20 @@ class ReversalExpert(BaseExpert):
         pred = pred.squeeze(-1)    # (B,)
         target = target.squeeze(-1) # (B,)
         mask = mask.squeeze(-1)     # (B,)
+        mask_f = mask.float()       # DirectML 上 bool.sum() 返回 bool, 必须转 float
 
         # Masked rank correlation approximation
-        pred_masked = pred * mask
-        target_masked = target * mask
+        pred_masked = pred * mask_f
+        target_masked = target * mask_f
 
         # Pearson correlation as a differentiable proxy for rank IC
-        pred_centered = pred_masked - pred_masked.sum() / mask.sum().clamp(min=1)
-        target_centered = target_masked - target_masked.sum() / mask.sum().clamp(min=1)
+        n = mask_f.sum().clamp(min=1)
+        pred_centered = pred_masked - pred_masked.sum() / n
+        target_centered = target_masked - target_masked.sum() / n
 
-        cov = (pred_centered * target_centered * mask).sum()
-        pred_std = ((pred_centered ** 2 * mask).sum() + 1e-8).sqrt()
-        target_std = ((target_centered ** 2 * mask).sum() + 1e-8).sqrt()
+        cov = (pred_centered * target_centered * mask_f).sum()
+        pred_std = ((pred_centered ** 2 * mask_f).sum() + 1e-8).sqrt()
+        target_std = ((target_centered ** 2 * mask_f).sum() + 1e-8).sqrt()
 
         ic = cov / (pred_std * target_std).clamp(min=1e-8)
         return -ic  # Negate: maximize IC

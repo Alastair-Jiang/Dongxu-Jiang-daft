@@ -79,5 +79,6 @@ class EventExpert(BaseExpert):
         sign_mismatch = (torch.sign(pred) != torch.sign(target)).float()
         adjusted_se = se * (1.0 + 4.0 * sign_mismatch)
 
-        loss = (adjusted_se * mask).sum() / mask.sum().clamp(min=1)
+        mask_f = mask.float()  # DirectML 兼容: bool.sum() 需转 float
+        loss = (adjusted_se * mask_f).sum() / mask_f.sum().clamp(min=1)
         return loss

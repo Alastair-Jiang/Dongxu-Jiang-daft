@@ -267,7 +267,7 @@ class JointTrainer:
                 routing_probs = outputs["routing_probs"]
 
                 # --- Joint loss: MSE on final signal + expert consistency ---
-                mse = ((signal - t_b) ** 2 * m_b).sum() / m_b.sum().clamp(min=1)
+                mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
 
                 # Expert consistency: lightly regularize each expert
                 expert_reg = 0.0
@@ -303,7 +303,7 @@ class JointTrainer:
                 with torch.no_grad():
                     outputs = self.model(s_b, layer_outputs, mode="val")
                     signal = outputs["signal"]
-                    mse = ((signal - t_b) ** 2 * m_b).sum() / m_b.sum().clamp(min=1)
+                    mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
                     total_loss += mse.item()
 
                 if return_predictions:

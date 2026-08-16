@@ -65,5 +65,6 @@ class TrendExpert(BaseExpert):
         adjusted_se = se * (1.0 + 10.0 * sign_mismatch)
 
         # Mean over valid (masked) elements
-        loss = (adjusted_se * mask).sum() / mask.sum().clamp(min=1)
+        mask_f = mask.float()  # DirectML 上 bool.sum() 返回 bool, 必须转 float
+        loss = (adjusted_se * mask_f).sum() / mask_f.sum().clamp(min=1)
         return loss
