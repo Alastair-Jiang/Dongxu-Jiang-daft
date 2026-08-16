@@ -59,7 +59,8 @@ def get_device(prefer: str = "auto", verbose: bool = True) -> torch.device:
 
     # --- Detection chain ---
     backend = _detect_backend()
-    device = torch.device(backend)
+    # 检测名(directml 等)需先归一化为 torch 设备串(privateuseone:0 等)
+    device = torch.device(_normalise_name(backend))
 
     _cached_device = device
     _cached_backend = backend
@@ -171,7 +172,7 @@ def _directml_device_string() -> str:
     """Return the torch-directml device string (typically 'privateuseone:0')."""
     try:
         import torch_directml
-        return str(torch_directml.default_device())
+        return str(torch_directml.device())   # e.g. 'privateuseone:0'
     except ImportError:
         # If torch-directml is requested but not installed, we still return a
         # string that will produce a clear error message from torch.device().
