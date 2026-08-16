@@ -27,6 +27,7 @@ from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary
 from daft.utils.experiment import config_hash, next_exp_path
+from daft.utils.device import get_device
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -34,7 +35,7 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 def run_fold(panel, t_train_end, t_test_start, t_test_end, cfg, seed=42):
     """一折: train [0,t_train_end) 训练, test [t_test_start,t_test_end) 评估。"""
     torch.manual_seed(seed)
-    device = torch.device("cpu")
+    device = get_device()
     T, N, _ = panel.shape
     train_panel = panel.slice_time(0, t_train_end)
     # 训练段内部再切 85/15 供 stage2/3 早停

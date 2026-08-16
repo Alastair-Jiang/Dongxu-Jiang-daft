@@ -39,6 +39,7 @@ from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
 from daft.utils.experiment import config_hash, next_exp_path
+from daft.utils.device import get_device
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints" / "oos"
@@ -99,7 +100,9 @@ def main():
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    device = torch.device("cpu")
+    # 设备自动检测(2026-08-16 接线): CUDA → XPU(Intel Arc) → DirectML → MPS → CPU
+    device = get_device()
+    print(f"      Device: {device}")
     t_total = time.time()
 
     cfg = {
