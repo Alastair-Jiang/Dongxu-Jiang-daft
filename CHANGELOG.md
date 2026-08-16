@@ -1,5 +1,40 @@
 # DAFT 更新日志
 
+## v0.3.0 — 工程修复 + 全面升级 (2026-08-16)
+
+### 修复批次(PR #9, 10 提交 squashed)
+
+- **通道契约修复**: 数据源 OHLCV 曾被特征引擎按 `[close, log_return, ...]`
+  错列读取, 此前所有实验 s_t 建立在错列上 → `base_features.py` 唯一转换点
+  + 12 个语义测试
+- **口径统一**: IC 对齐 k→k+1; 换手率改真实仓位; MaxDD 百分比; val-IC 改
+  逐时步截面 rank IC; CDAP 改 logit 空间(零调制严格无扰动)
+- **脚本健康**: n_experts 统一 10(修 6 个脚本 forward 崩溃); baostock 重试;
+  实验产物唯一文件名 + config hash; trend_expert 缺导入
+- **环境守卫**: pytest `pythonpath=["src"]` + conftest 源码守卫;
+  CI(PR 自动 pytest)上线
+- 测试: **384 passed / 1 skipped**
+
+### 全面升级(本轮)
+
+- **共享模型工厂** `src/daft/models/factory.py`: 7 个脚本的重复构建代码
+  统一(-189 行), 自带 n_experts 守卫
+- **涨跌停 mask**: A 股 ±10%(创业板/科创板 ±20%)涨跌停日不可成交
+- **hs300 真实成分股池**: `--universe hs300` 用 baostock 按 start_date 拉取
+  沪深300 成分(解除 50 只上限 + 缓解幸存者偏差)
+- **扩池重测**(hs300 100 股 + 涨跌停 mask, train 60%):
+  - Ridge 基线: **IC +0.048 / t +5.19 / 净 Sharpe +0.53** ← 30 股无信号
+    是股票池效应, 100 股下基线即达 GO 线
+  - DAFT 100 股: 待登记
+- 文档: ROADMAP.md(路线图) / PROJECT_EVALUATION.md(项目评判) /
+  FIX_REPORT_20260816.md(修复报告) / EXPERIMENT_REGISTRY 扩池登记
+
+### 决策记录
+
+- `feat/residual-gate-port`(记忆门收缩先验): **挂起不移植**, 数学实现
+  保留原样, 待信号验证后按新架构重做移植
+- AHM / top-3 稀疏 / Markowitz: 挂起(信号验证优先)
+
 ## v0.2.0 — 全管道打通 (2026-08-06/07)
 
 ### 新增模块（消除所有 NotImplementedError）
