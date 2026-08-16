@@ -88,10 +88,14 @@ def run_fold(panel, t_train_end, t_test_start, t_test_end, cfg, seed=42):
             signals[t] = out["signal"].squeeze(-1).cpu()
             model.memory.detach_state()
 
-    # 测试段评估(对齐 k→k+1)
+    # 测试段评估(对齐 k→k+1): signals[t] 预测 p[t+1]-p[t]。
+    # signals 只有 T-1 行, 测试段终点为 T 时需补一行哑元与 prices 对齐。
     n_test = t_test_end - t_test_start
-    signals_test = torch.cat([signals[t_test_start:t_test_end],
-                              torch.zeros(1, N)], dim=0)
+    n_sig = min(t_test_end, T - 1) - t_test_start
+    seg = signals[t_test_start:min(t_test_end, T - 1)]
+    if n_sig < n_test:
+        seg = torch.cat([seg, torch.zeros(n_test - n_sig, N)], dim=0)
+    signals_test = seg
     prices_test = panel.values[t_test_start:t_test_end, :, 3]
     mask_test = panel.mask[t_test_start:t_test_end]
 

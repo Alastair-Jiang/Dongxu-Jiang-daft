@@ -42,14 +42,18 @@ The architecture is systematically derived from **Kimi K3** (Moonshot AI, July 2
 | **100 股 hs300** | **Ridge 基线** | **+0.0482** | **+5.19** | **+0.53** | 1.85 |
 | **100 股 hs300** | **DAFT (quick)** | **+0.0368** | **+3.65** | **−1.72** | 2.34 |
 | **100 股 hs300** | **DAFT + 平滑 λ*=0.7** | +0.0274 | +2.36 | **−0.60** | 0.98 |
+| **100 股 hs300** | **DAFT 换手控制(freq=5+分数仓位)** | +0.0353 | +3.50 | **+0.25** | 0.63 |
+| **100 股 hs300** | DAFT walk-forward 2折 | 0.013~0.048 | 1.1~4.6 | −1.47~−0.70 | 2.1~2.3 |
 
 - **30 股无信号是股票池效应**; 100 股 hs300 下信号显著存在, Ridge 基线
   即达预注册 GO 线(IC≥0.04 且 t≥2.0)。
-- **DAFT 有信号但尚弱于线性基线**(0.037 vs 0.048)且换手更高; 信号平滑
-  (λ 由 val 选)把换手减半、净 Sharpe −1.72→−0.60, 验证了降换手假设。
-- **判定预判: 有条件 GO** — 需换手控制 + 信号增强 + 成本真实性后重测
-  (判据与全量数字见 [EXPERIMENT_REGISTRY.md](docs/EXPERIMENT_REGISTRY.md),
-  截止 2026-09-30)。
+- **DAFT 有信号但弱于线性基线**(典型 IC 0.035~0.037 vs Ridge 0.048)且
+  换手更高; **调仓降频(freq=5)+分数仓位使净 Sharpe 转正 +0.25**(IC 无衰减),
+  平滑(λ=0.8)到 −0.47 接近极限; --full 训练无益; walk-forward 显示 DAFT
+  训练量敏感(727 天训练 IC 仅 0.013, 969 天达 0.048 ≈ Ridge)。
+- **判定: 见 [DECISION_20260930.md](docs/DECISION_20260930.md) — 预判暂定
+  NO-GO(架构) 方向**(打不过 Ridge = 复杂度未变现), 正式签字前保留
+  消融归因/长历史训练/成本真实性重测三条路径, 截止 2026-09-30。
 - 全部数字可追溯至 `outputs/EXP-20260816-*.json` + config hash;
   规划见 [ROADMAP.md](docs/ROADMAP.md), 评判见 [PROJECT_EVALUATION.md](docs/PROJECT_EVALUATION.md)。
 
