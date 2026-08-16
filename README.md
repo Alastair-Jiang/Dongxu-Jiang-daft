@@ -29,9 +29,29 @@ The architecture is systematically derived from **Kimi K3** (Moonshot AI, July 2
 
 ---
 
+## Current Status (updated 2026-08-16)
+
+**工程修复批次已合入 main(PR #9)** — 三人评审 + 运行时验证发现并修复了 8 类问题, 最重要的是**通道契约 bug**: 数据源 OHLCV 一直被特征引擎当作 `[close, log_return, ...]` 错列读取, 此前所有实验的 s_t 都建立在错列上。详见 [docs/FIX_REPORT_20260816.md](docs/FIX_REPORT_20260816.md)。
+
+**当前实验结果(修复后, 2021–2025 日线, 30 股, 严格样本外)**:
+
+| 变体 | OOS Rank IC | IC t | 净 Sharpe | 真实换手 |
+|---|---|---|---|---|
+| Ridge 基线 | +0.0001 | +0.01 | −1.10 | 1.74 |
+| DAFT (quick) | +0.0077 | +0.51 | −1.66 | 2.37 |
+| DAFT + 信号平滑 λ*=0.7 | +0.0128 | +0.81 | **−0.14** | 0.96 |
+
+- 修复前 Ridge 的 "IC=0.029 / t=1.89" 是错列特征的产物, **已作废**; 修复后基线信号 ≈ 0。
+- 信号平滑(λ 在 val 段选)把换手减半、净 Sharpe −1.66→−0.14, 验证了降换手的假设, 但尚未转正。
+- 所有数字可追溯到 `outputs/EXP-20260816-*.json` 与 [EXPERIMENT_REGISTRY.md](docs/EXPERIMENT_REGISTRY.md)(含预注册的 v1.0.0 Go/No-Go 判定标准, 截止 2026-09-30)。
+- **下一步**: 股票池 30→100+、涨跌停 mask、多窗口 walk-forward 后重测再判定。
+
+---
+
 ## Table of Contents
 
 - [Why This Exists](#why-this-exists)
+- [Current Status](#current-status-updated-2026-08-16)
 - [Architecture](#architecture)
   - [High-Level Design](#high-level-design)
   - [Component 1: Regime Router](#component-1-regime-router)
@@ -363,79 +383,66 @@ The model has **~315K total parameters** for the core ensemble (10 experts; ≈4
 daft/
 ├── README.md                         # This document
 ├── LICENSE                           # MIT
-├── pyproject.toml                    # Build config + dependencies
+├── pyproject.toml                    # Build config + deps + pytest(pythonpath=src)
 ├── .gitignore
+├── .github/workflows/                # CI: PR 自动 pytest + PR 报告生成
 │
-├── configs/                          # YAML experiment configs
-│   ├── small.yaml                    #   Smoke test (synthetic, 30s)
-│   ├── paper.yaml                    #   Full experiment
-│   └── hardening.yaml                #   Hardening-specific ablation
+├── configs/                          # YAML 参考配置(⚠️ 当前未接线, 实际配置在各脚本
+│   ├── small.yaml                    #   的 DEFAULT_CONFIG 字典里)
+│   ├── paper.yaml
+│   └── hardening.yaml
 │
 ├── src/daft/                         # Main package
-│   ├── __init__.py                   #   Version, public API
+│   ├── data/
+│   │   ├── panel.py                  #   Panel dataclass (T×N×F + 2D mask)
+│   │   ├── loaders.py                #   合成数据生成器 + 数据源分派
+│   │   └── adapters/                 #   baostock(带重试) / yfinance → Panel
 │   │
-│   ├── data/                         # Data pipeline
-│   │   ├── __init__.py
-│   │   ├── panel.py                  #   Panel dataclass (T×N×F tensor + masks)
-│   │   └── loaders.py                #   Data source adapters ( → )
-│   │
-│   ├── features/                     # Feature engineering
-│   │   ├── __init__.py
-│   │   ├── tensor_factors.py         #   GPU-vectorized primitives (rank, corr, ewma, ts_*)
-│   │   ├── legacy_factors.py         #   204 hand-crafted alpha factors
-│   │   ├── regime_features.py        #   Market state vector s_t construction
-│   │   └── freq_features.py          #   FFT spectral features (Super-Linear style)
+│   ├── features/
+│   │   ├── base_features.py          #   ★ 通道契约: OHLCV→基础布局唯一转换点
+│   │   ├── tensor_factors.py         #   掩码感知原语 (rank, corr, ewma, ts_*)
+│   │   ├── regime_features.py        #   200 维市场状态 s_t(6 组)
+│   │   ├── freq_features.py          #   FFT 频谱特征(未接入主管线)
+│   │   └── legacy_factors.py         #   35 个手工因子(未接入主管线)
 │   │
 │   ├── models/                       # Core architecture (MAIN CONTRIBUTION)
-│   │   ├── __init__.py
-│   │   ├── experts/                  #   Strategy expert pool
-│   │   │   ├── __init__.py
-│   │   │   ├── base_expert.py        #     Abstract expert interface
-│   │   │   ├── trend_expert.py       #     Trend-following (moving average crossover, MACD)
-│   │   │   ├── reversal_expert.py    #     Mean-reversion (Bollinger, RSI, cointegration)
-│   │   │   ├── volatility_expert.py  #     Volatility regime (GARCH signal, VIX-related)
-│   │   │   └── event_expert.py       #     Event-driven (earnings, macro announcements)
+│   │   ├── experts/                  #   10 专家: trend/reversal/volatility/
+│   │   │                             #   event/momentum × 2
 │   │   ├── router.py                 #   [C1] Regime Router (Stable LatentMoE)
 │   │   ├── memory.py                 #   [C2] KDA Market Memory
 │   │   ├── cross_dim_attn.py         #   [C3] Cross-Dimension Attention Protocol ★
-│   │   ├── hardening.py              #   [C4] Adaptive Hardening Mechanism ★
-│   │   └── ensemble.py               #   Expert fusion + signal generation
+│   │   ├── hardening.py              #   [C4] Adaptive Hardening(研究性, 默认关闭)
+│   │   └── ensemble.py               #   专家融合 + 信号生成
 │   │
 │   ├── training/                     # Staged training pipeline
-│   │   ├── __init__.py
-│   │   ├── expert_trainer.py         #   Stage 1: Independent expert training
-│   │   ├── router_trainer.py         #   Stage 2: Router + Memory training (experts frozen)
-│   │   └── joint_trainer.py          #   Stage 3: Joint fine-tuning (all parameters)
+│   │   ├── expert_trainer.py         #   Stage 1: 独立专家训练
+│   │   ├── router_trainer.py         #   Stage 2: Router+Memory+CDAP(冻结专家)
+│   │   └── joint_trainer.py          #   Stage 3: 联合微调
 │   │
-│   ├── portfolio/                    # Portfolio construction
-│   │   ├── __init__.py
-│   │   └── markowitz.py              #   Ledoit-Wolf shrunk Markowitz optimization
-│   │
-│   └── backtest/                     # Evaluation
-│       ├── __init__.py
-│       └── engine.py                 #   Vectorized backtesting + metrics (Sharpe, IC, IR, DD)
+│   ├── portfolio/markowitz.py        # Ledoit-Wolf Markowitz(未接入主管线)
+│   ├── backtest/engine.py            # 向量化回测: 成本/真实换手/百分比 MaxDD
+│   └── utils/                        # metrics / device / experiment 命名
 │
-├── notebooks/                        # Analysis notebooks
-│   ├── 01_data_exploration.ipynb     #     (placeholder)
-│   ├── 02_regime_analysis.ipynb      #     (placeholder)
-│   ├── 03_ablation_results.ipynb     #     (placeholder)
-│   └── 04_hardening_analysis.ipynb   #     (placeholder)
+├── tests/                            # 385 项测试(384 passed / 1 skipped)
+│   ├── conftest.py                   #   共享 fixture + 源码守卫
+│   ├── test_base_features.py         #   ★ 通道契约语义测试
+│   ├── test_backtest.py              #   masked 做空 / 真实换手回归测试
+│   └── test_{router,memory,cross_dim_attn,hardening,ensemble,...}.py
 │
-├── tests/                            # Test suite
-│   ├── __init__.py
-│   ├── test_router.py                #     (placeholder)
-│   ├── test_memory.py                #     (placeholder)
-│   ├── test_cross_dim_attn.py        #     (placeholder)
-│   ├── test_hardening.py             #     (placeholder)
-│   └── test_ensemble.py              #     (placeholder)
+├── docs/                             # 文档
+│   ├── SPECIFICATION.md              #   技术说明书(含 2026-08-16 勘误)
+│   ├── FIX_REPORT_20260816.md        #   ★ 修复批次报告 + 后续计划
+│   ├── EXPERIMENT_REGISTRY.md        #   ★ 实验登记表 + Go/No-Go 预注册
+│   ├── PROJECT_REPORT.md             #   项目进度报告
+│   └── ...                           #   architecture/guided-tour/collaboration
 │
-├── docs/                             # Extended documentation
-│   ├── architecture.md               #   Detailed architecture specification
-│   └── experiments.md                #   Experiment log template
-│
-└── scripts/                          # Utility scripts
-    ├── fetch_data.py                 #     (placeholder)
-    └── run_ablation.py               #     (placeholder)
+└── scripts/                          # 可运行入口(README 快速上手即这些)
+    ├── run_full_pipeline_oos.py      #   ★ 真实数据严格样本外全管线(主实验)
+    ├── run_baseline_ridge_real.py    #   ★ Ridge 基线(与 DAFT 同口径)
+    ├── run_smoothing_ablation.py     #   ★ 信号平滑消融(λ 在 val 选)
+    ├── run_stage1.py / run_stage2.py / run_stage3.py   # 合成数据分阶段训练
+    ├── run_backtest_only.py / run_oos_backtest_only.py # 复用 checkpoint 回测
+    └── smoke_test.py                 #   冒烟测试(README 快速上手入口)
 ```
 
 ---
@@ -452,6 +459,7 @@ Each expert is trained on its regime-specific subset of the data.
 | Reversal Expert | Periods with low ADX, oscillating within bands | IC (Information Coefficient) |
 | Volatility Expert | Periods with VIX/ATR above rolling 80th percentile | Volatility forecast MSE |
 | Event Expert | ±3-day windows around earnings, FOMC, macro releases | Post-event directional accuracy |
+| Momentum Expert | All data (cross-sectional momentum specialization) | Same as trend-family loss |
 
 ### Stage 2: Router + Memory Training
 
@@ -468,97 +476,119 @@ Each expert is trained on its regime-specific subset of the data.
 - **Low learning rate** ($\eta = 10^{-5}$) to prevent catastrophic forgetting
 - **Early stopping** on validation IC degradation
 
-### Stage 4: Hardening
+### Stage 4: Hardening (暂缓, 默认关闭)
 
 - Stage 3 model run in **inference mode** over the full training set
 - Hardening engine **counts** $(regime, expert\_pattern)$ co-occurrence frequencies
 - Patterns with count $\geq \theta_{\text{harden}}$ are **cached**
 - Validation on held-out period: **fast-path vs. full-path accuracy delta < 2%** required for hardening acceptance
+- ⚠️ 2026-08-16: AHM 为研究性实现, 训练/评估路径默认禁用; fast path 仅跳过
+  CDAP 投影(专家照常全算), 延迟收益需重新评估后再启用
 
 ---
 
 ## Experiments
 
-> **⚠️ PLACEHOLDER — Experimental results will be populated as training completes.**
+> 实验纪律: **每个数字必须可追溯到 `outputs/EXP-YYYYMMDD-NN-*.json` + config hash**,
+> 登记于 [EXPERIMENT_REGISTRY.md](docs/EXPERIMENT_REGISTRY.md)。
+> 2026-08-16 修复批次之前的全部实验数字已作废(通道错列 + 口径不一致)。
 
-### Benchmarks
+### 已登记实验(修复后新口径)
+
+严格样本外(时间切分, 标准化仅 train 段), 2021-2025 日线, 30 只 CSI300 成分股,
+成本 5bp+1bp, top20% 多空:
+
+| 实验 | 变体 | OOS Rank IC | IC t | 净 Sharpe | 真实换手 | 产物 |
+|---|---|---|---|---|---|---|
+| EXP-20260816-02 | Ridge 基线 | +0.0001 | +0.01 | −1.10 | 1.74 | `EXP-20260816-02-ridge-real.json` |
+| EXP-20260816-03 | DAFT quick | +0.0077 | +0.51 | −1.66 | 2.37 | `EXP-20260816-01-daft-oos.json` |
+| EXP-20260816-04 | DAFT + 平滑 λ*=0.7 | **+0.0128** | +0.81 | **−0.14** | 0.96 | `EXP-20260816-01-daft-smoothing-ablation.json` |
+
+**读法**: 该口径下基线信号 ≈ 0; DAFT 与基线同数量级; 信号平滑(λ 由 val 段
+净 Sharpe 选出)把换手减半、净 Sharpe 从 −1.66 抬到 −0.14, 但仍未转正。
+单窗口 243 个测试日的 t 检验统计效力有限, 结论以扩池(100+ 股)与多窗口
+重测为准。判定标准见登记表预注册章节(截止 2026-09-30)。
+
+### Benchmarks (规划)
 
 | Benchmark | Description | Data Source |
 |-----------|-------------|-------------|
+| **CSI 300 Daily** | 30 股日线(已完成首轮) → 100+ 股(下一步) | baostock |
 | **CSI 500 Minutes** | 500 A-share stocks, 5-year 1-minute bars | (to be configured) |
-| **CSI 300 Multi-Freq** | 300 stocks, daily/weekly/minutely factors | (to be configured) |
 | **S&P 500 ETF Universe** | US-listed ETFs, multi-asset | (to be configured) |
 
-### Ablation Studies
+### Ablation Studies (规划)
 
 To isolate the contribution of each architectural component, we disable one at a time:
 
 | Experiment | CDAP | AHM | Router → Mem | Mem → Depth | Depth → Router |
 |------------|:----:|:---:|:------------:|:-----------:|:--------------:|
-| Full DAFT | ✅ | ✅ | ✅ | ✅ | ✅ |
-| – CDAP | ❌ | ✅ | ❌ | ❌ | ❌ |
-| – AHM | ✅ | ❌ | ✅ | ✅ | ✅ |
-| – R→M only | ✅ | ✅ | ❌ | ✅ | ✅ |
-| – M→D only | ✅ | ✅ | ✅ | ❌ | ✅ |
-| – D→R only | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Baseline (MLP) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Baseline (Transformer) | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Time-MoE (ICLR 2025) | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Full DAFT | ✅ | ❌* | ✅ | ✅ | ✅ |
+| – CDAP | ❌ | ❌ | ❌ | ❌ | ❌ |
+| – R→M only | ✅ | ❌ | ❌ | ✅ | ✅ |
+| – M→D only | ✅ | ❌ | ✅ | ❌ | ✅ |
+| – D→R only | ✅ | ❌ | ✅ | ✅ | ❌ |
+| Baseline (Ridge) | ❌ | ❌ | ❌ | ❌ | ❌ |
 
-**Expected Outcome**: Each CDAP connection contributes a marginal improvement; the full three-way modulation is more than the sum of its parts (synergy hypothesis). AHM should reduce average inference latency by 60–80% with < 2% accuracy degradation.
+\*AHM 为研究性实现, 训练/评估路径默认关闭(见 Component 4 的注记)。
 
-### Hardening Analysis
+**Expected Outcome**: Each CDAP connection contributes a marginal improvement; the full three-way modulation is more than the sum of its parts (synergy hypothesis).
 
-| Metric | Full Path | Hardened Path | Δ |
-|--------|-----------|---------------|---|
-| Avg. Inference Time | (ms) | (ms) | –% |
-| Sharpe Ratio | — | — | — |
-| Max Drawdown | — | — | — |
-| IC (Rank) | — | — | — |
-| % Fast-Path Eligible | — | — | — |
-| Regime Degradation Rate | — | — | — |
+### Hardening Analysis (暂缓)
+
+AHM 默认关闭, 延迟与快路径分析推迟到信号验证通过之后
+(推理优化不应先于信号验证)。
 
 ---
 
 ## Performance
 
-> **⚠️ PLACEHOLDER — Performance metrics will be populated as training completes.**
+> 修复后新口径的已测数字见 [Experiments](#experiments); 其余基线待扩池实验后补。
 
-### Forecast Accuracy
+### Forecast Accuracy (30 股日线, 2021–2025, 严格样本外)
 
-| Model | IC (Rank) | ICIR | RMSE |
-|-------|-----------|------|------|
-| DAFT (Ours) | — | — | — |
-| Transformer | — | — | — |
-| MLP | — | — | — |
-| XGBoost | — | — | — |
-| Time-MoE | — | — | — |
+| Model | OOS Rank IC | IC t-stat | 净 Sharpe |
+|-------|-----------|-----------|-----------|
+| Ridge | +0.0001 | +0.01 | −1.10 |
+| DAFT (quick) | +0.0077 | +0.51 | −1.66 |
+| DAFT + smoothing λ*=0.7 | +0.0128 | +0.81 | −0.14 |
+| Transformer / MLP / XGBoost | — | — | — (待扩池实验) |
 
 ### Inference Efficiency
 
-| Mode | Tokens/s-equiv* | Latency (ms/step) | Memory (MB) |
-|------|-----------------|-------------------|-------------|
-| Full Path (3 experts) | — | — | — |
-| Hardened Path (cached) | — | — | — |
-| Speedup Ratio | — | — | — |
+| Mode | Latency (ms/step) | Memory (MB) |
+|------|-------------------|-------------|
+| Full Path (10 experts, 稠密软门控) | 实测待补 | ≈315K 参数 |
+| Hardened Path (cached) | 默认关闭, 暂缓 | — |
 
-*\*"Tokens/s-equiv": financial time-step equivalents processed per second*
+*\*top-k 稀疏激活尚未真正落实(ensemble 当前对所有专家稠密计算), 效率对比留待
+稀疏实现或声明修正后补测。*
 
 ---
 
 ## Limitations
 
-1. **Single-market validation**. Initial experiments focus on Chinese A-shares. Cross-market generalization (US equities, crypto, FX) remains unverified.
+1. **当前实验口径有限**: 首轮判定实验仅覆盖 30 股日线、单一 2021–2025 窗口
+   (243 个测试日, t 检验统计效力低)。扩池(100+ 股)与多窗口 walk-forward
+   是下一步; 在完成前, 任何单窗口结论都应谨慎解读。
 
-2. **Mid-frequency only**. The architecture assumes minute- to hour-scale decision horizons. Extending to tick-level (HFT) or monthly (factor investing) requires architectural adaptation.
+2. **幸存者偏差未消除**: 股票池为当前 CSI300 成分静态清单, 回测窗口内
+   退市/调出股票未纳入。需 point-in-time 成分或明确声明局限。
 
-3. **10 experts may underfit regime diversity**. K3 uses 896 experts; DAFT uses 10. This is a deliberate trade-off for training feasibility on consumer hardware, but may miss nuanced market sub-regimes.
+3. **A 股交易约束未建模**: 涨跌停(±10%)不可成交日未从回测剔除; T+1 制度、
+   市场冲击与容量约束未实现。判定"有条件 GO"时这些是必做项。
 
-4. **Hardening assumes regime stationarity within cache window**. If markets undergo a structural break (e.g., T+0 reform, circuit breaker introduction), cached fast paths may become stale. The entropy-based degradation trigger is a heuristic — it can fail if the break is gradual rather than abrupt.
+4. **Single-market validation**. Initial experiments focus on Chinese A-shares. Cross-market generalization (US equities, crypto, FX) remains unverified.
 
-5. **Transaction costs not fully modeled**. Current backtesting uses simplified cost assumptions. Production deployment would require bid-ask spread, market impact, and capacity constraint modeling.
+5. **Mid-frequency only**. The architecture assumes minute- to hour-scale decision horizons. Extending to tick-level (HFT) or monthly (factor investing) requires architectural adaptation.
 
-6. **No live trading validation**. All results are historical backtests. Live forward-testing with paper trading is needed to confirm robustness against overfitting.
+6. **10 experts may underfit regime diversity**. K3 uses 896 experts; DAFT uses 10. This is a deliberate trade-off for training feasibility on consumer hardware, but may miss nuanced market sub-regimes.
+
+7. **Hardening assumes regime stationarity within cache window**. If markets undergo a structural break (e.g., T+0 reform, circuit breaker introduction), cached fast paths may become stale. The entropy-based degradation trigger is a heuristic — it can fail if the break is gradual rather than abrupt.
+
+8. **Transaction costs not fully modeled**. Current backtesting uses simplified cost assumptions. Production deployment would require bid-ask spread, market impact, and capacity constraint modeling.
+
+9. **No live trading validation**. All results are historical backtests. Live forward-testing with paper trading is needed to confirm robustness against overfitting.
 
 ---
 
@@ -573,7 +603,7 @@ If you use DAFT in your research, please cite:
   year         = {2026},
   publisher    = {GitHub},
   journal      = {GitHub Repository},
-  url          = {https://github.com/[Dongxu-Jiang]/daft},
+  url          = {https://github.com/Alastair-Jiang/Dongxu-Jiang-daft},
   note         = {A cross-dimensional attention architecture for medium-frequency
                   quantitative trading, inspired by Kimi K3},
 }
