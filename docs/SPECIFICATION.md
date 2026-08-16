@@ -2,7 +2,7 @@
 
 > **Dimension-Aware Financial Trading**
 > 面向中频量化交易的跨维度注意力架构
-> Version **v0.2.1** · 2026-08-16
+> Version **v0.3.0** · 2026-08-16
 
 ---
 
@@ -12,12 +12,15 @@
 |------|------|--------|
 | v0.1.0 | 2026-07 | 核心架构（MoE 专家池 + Regime Router + KDA Memory + CDAP + AHM） |
 | v0.2.0 | 2026-08-06/07 | 全管道打通，消除所有 `NotImplementedError` |
-| **v0.2.1** | **2026-08-16** | **工程修复批次**：通道契约、口径统一、10 专家、脚本崩溃修复 |
+| **v0.3.0** | **2026-08-16** | **工程修复(PR #9) + 全面升级**：通道契约/口径统一/10 专家、工厂去重、涨跌停 mask、hs300 成分股池、交易制度约束 |
 
-> v0.2.1 是一次纯工程修复（bug fix）版本，不含新功能。它修正了早期实现与
-> 文档的多处出入——最严重的是**数据通道错列**（数据源的 OHLCV 被特征引擎
-> 当作基础特征读取），此前所有实验的 s_t 都建立在错列之上。本说明书以
-> v0.2.1 的真实实现为准。
+> v0.3.0 是一次**工程修复 + A 股口径升级**，不含架构变更。修复批次（PR #9）
+> 修正了早期实现与文档的多处出入——最严重的是**数据通道错列**（数据源的
+> OHLCV 被特征引擎当作基础特征读取），此前所有实验的 s_t 都建立在错列之上。
+> 全面升级进一步补齐 A 股交易制度（涨跌停 mask、T+1 成交约束、调仓频率与
+> 分数仓位）、把股票池从 50 只内置样本升级到 hs300 真实成分（`--universe hs300`，
+> 按 start 日拉取、解除 50 只上限并缓解幸存者偏差），并完成扩池重测与稳健性
+> 验证。本说明书以 v0.3.0 的真实实现为准。
 
 ---
 
@@ -84,7 +87,7 @@ DAFT 是一套受 **Kimi K3**（Moonshot AI, 2026年7月, 2.8T参数开源大模
 |------|------|
 | 专家数 | 10（5 类 × 2 实例） |
 | 总参数 | 核心 ≈31.5 万；含 layer_proj ≈41.7 万 |
-| 测试套件 | 384 passed, 1 skipped |
+| 测试套件 | 396 项（pytest collected） |
 | 特征提取速度 | 2.0s（500天 × 20股, 日频） |
 | 内存状态大小 | 128 × 64 = 8,192 float32 ≈ 32 KB |
 | 每步推理复杂度 | O(d_k · d_v) = O(8192)，与序列长度无关 |
@@ -224,8 +227,10 @@ class Panel:
 ```
 
 **Mask** 的作用：标记停牌、涨跌停板等不可交易状态，在训练和回测中被自动跳过。
+A 股口径下，mask 由两部分合成：`close` 有效性（NaN → 停牌/缺失，置 False）与
+涨跌停检测（`_limit_move_mask`，见 4.6）。
 
-### 4.2 通道契约（v0.2.1 修复 ★ 关键）
+### 4.2 通道契约（v0.3.0 修复 ★ 关键）
 
 数据源与特征引擎之间存在**两种不同的通道布局**，历史上被直接混用，导致特征错列：
 
@@ -237,7 +242,7 @@ class Panel:
     ["close", "log_return", "volume", "volume_ratio", "volatility_20"]  ← 基础布局
 ```
 
-**v0.2.1 修复**：新增 `src/daft/features/base_features.py` 作为**唯一转换点**，
+**v0.3.0 修复**：新增 `src/daft/features/base_features.py` 作为**唯一转换点**，
 所有特征引擎入口必须首先调用 `ensure_base_panel`：
 
 ```python
@@ -271,7 +276,7 @@ panel = loader.load()
 
 | 适配器 | 文件 | 数据来源 | 状态 |
 |--------|------|---------|------|
-| Baostock | `data/adapters/baostock_adapter.py` | A 股免费数据 | 可用（含批量拉取重试） |
+| Baostock | `data/adapters/baostock_adapter.py` | A 股免费数据 | 可用（批量重试 + 涨跌停 mask + hs300 成分） |
 | YFinance | `data/adapters/yfinance_adapter.py` | 美股/全球 | 可用 |
 | Synthetic | `data/loaders.py` | 几何布朗运动生成 | 可用 |
 
@@ -282,6 +287,35 @@ panel = loader.load()
 ```
 S_t = S_{t-1} · exp(μΔt + σ√Δt · ε_t),  ε_t ~ N(0,1)
 ```
+
+### 4.6 A 股口径升级（v0.3.0 新增）
+
+#### 4.6.1 涨跌停 mask
+
+A 股有涨跌停制度（主板 ±10%，创业板 300/301 与科创板 688 ±20%）。涨停买不进、
+跌停卖不出，若不处理会把无法成交的"假信号"计入回测收益。`baostock_adapter.py`
+的 `_limit_move_mask` 在加载数据时把触及涨跌停的交易日 mask 置 `False`：
+
+- 阈值：`_is_gem_or_star(ticker)` 判断板块，主板 0.095、创业板/科创板 0.195
+  （留 0.5% 余量防前复权误差）。
+- 判定：当日 close 相对前一交易日 close 的 |涨跌幅| ≥ 阈值 → 该日不可成交。
+- 边界：首个交易日无前收盘不判（True）；缺失收盘（NaN）的日子保持 True，
+  由 NaN mask 另行置 False，不重复处理。
+
+开关由 `config["handle_limit_up_down"]`（默认 `True`）控制。
+
+#### 4.6.2 hs300 真实成分股池
+
+早期实验用内置 50 只静态样本，既有人工上限（截面太小、权重股同质），也有
+幸存者偏差。v0.3.0 各运行脚本新增 `--universe hs300`（默认），按 `start` 日
+拉取真实沪深 300 成分股，解除 50 只上限并缓解幸存者偏差：
+
+```bash
+python scripts/run_full_pipeline_oos.py --stocks 100 --universe hs300
+```
+
+`--universe sample` 退回内置静态清单。100 股 hs300 口径下的重测结果见第 13 章
+（Ridge IC 0.048/Sharpe +0.53 达 GO 线，30 股无信号被证伪为股票池效应）。
 
 ---
 
@@ -307,7 +341,7 @@ Panel(T×N×F)
     s_t ∈ R^200  市场状态向量
 ```
 
-> **重要澄清（v0.2.1）**：手工因子注册表为 **35 个**（非早期文档的 213）；
+> **重要澄清（v0.3.0）**：手工因子注册表为 **35 个**（非早期文档的 213）；
 > 且 legacy 因子与 FFT 特征**当前未接入**任何训练/评估管线。200 维 s_t
 > 全部由 `RegimeFeatureExtractor` 从基础特征派生。
 
@@ -336,7 +370,7 @@ FFT(signal) → 功率谱
     └── 高频段 (短期波动)   → mean/power + noise ratio
 ```
 
-> 当前为独立模块，**未接入**训练/评估管线（v0.2.1 澄清）。
+> 当前为独立模块，**未接入**训练/评估管线（v0.3.0 澄清）。
 
 ### 5.4 RegimeFeatureExtractor — 市场状态向量
 
@@ -362,7 +396,7 @@ FFT(signal) → 功率谱
 - 流动性因子（成交量变化模式）
 - 时间序列算子组合（rank, ts_mean, ts_std, corr 等组合）
 
-所有因子通过 `LegacyFactorRegistry` 统一管理。> 当前为独立模块，**未接入**训练/评估管线（v0.2.1 澄清）。
+所有因子通过 `LegacyFactorRegistry` 统一管理。> 当前为独立模块，**未接入**训练/评估管线（v0.3.0 澄清）。
 
 ---
 
@@ -531,7 +565,7 @@ j = e ⊙ m ⊙ d   ∈ R^64
 | → Memory | g_t = σ(W^memory_out · j) ∈ (0,1)^{128} | 额外遗忘门调制 |
 | → Depth | w_t = softmax(W^depth_out · j) ∈ Δ² | 跨层特征检索权重 |
 
-> **v0.2.1 修正**：路由调制在 **logit 空间**进行（`softmax(log p + δ·bias)`），
+> **v0.3.0 修正**：路由调制在 **logit 空间**进行（`softmax(log p + δ·bias)`），
 > 保证零调制（δ=0 或 j=0）时严格无扰动——旧实现直接在概率空间加偏置，
 > 初始化即扭曲路由。
 
@@ -608,7 +642,7 @@ if H(p_recent) > λ_entropy × H_baseline:
 
 #### 6.4.3 当前状态
 
-> **v0.2.1 澄清**：AHM 为**研究性实现，默认禁用**。`ExpertEnsemble` 的
+> **v0.3.0 澄清**：AHM 为**研究性实现，默认禁用**。`ExpertEnsemble` 的
 > `use_hardening` 参数默认 `False`。硬化快路径的完整接线（`detect_regime_shift`、
 > `evict` 在生产管线中的调用）尚未完成，见附录 C 待办。
 
@@ -644,7 +678,7 @@ class BaseExpert(nn.Module):
 | **EventExpert** | 2 | 48 | 全部数据（兜底） | BCE on return direction |
 | **MomentumExpert** | 2 | 64 | 20日截面动量显著非零 | Direction-weighted MSE（方向错 ×8） |
 
-**MomentumExpert（v0.2.1 新增）**：专注**截面动量** regime，与纯趋势跟踪区分——
+**MomentumExpert（v0.3.0 新增）**：专注**截面动量** regime，与纯趋势跟踪区分——
 趋势专家捕捉方向性 ADX 过滤运动，动量专家捕捉"赢家恒赢"的截面持续性
 （20 日形成期横截面动量显著非零，且 top/bottom decile 价差拉大）。
 研究依据：Chichernea et al. (JFE 2021) 论证动量与反转是**独立的、regime 依赖**
@@ -692,10 +726,10 @@ class ExpertEnsemble(nn.Module):
 | `val` | τ=1.0, noisy gating OFF | 完整计算 | 不使用 | 不跟踪 |
 | `inference` | τ=0.1, noisy gating OFF | 先查缓存 | 按需使用 | 不跟踪 |
 
-### 8.3 模型工厂 factory.py（v0.2.1 新增）
+### 8.3 模型工厂 factory.py（v0.3.0 新增）
 
 历史上 `build_experts` / `build_ensemble` / `build_layer_proj` 在 7 个脚本里
-各复制一份，**n_experts 8 vs 10 的 forward 崩溃正是这样漂出来的**。v0.2.1
+各复制一份，**n_experts 8 vs 10 的 forward 崩溃正是这样漂出来的**。v0.3.0
 新增 `src/daft/models/factory.py` 提供单一权威入口：
 
 ```python
@@ -800,25 +834,55 @@ engine = BacktestEngine(config={
     "top_quantile": 0.2,
     "long_only": True,
     "annualization": 252,
-    "rebalance_freq": 1,
+    "rebalance_freq": 1,            # 调仓频率（v0.3.0）
+    "weight_mode": "equal",         # equal | signal_zscore（分数仓位）
+    "signal_smoothing": 0.0,        # EMA 平滑系数 λ（0=不启用）
+    "respect_mask_no_trade": True,  # 成交约束（停牌/涨跌停日禁开平仓）
 })
-results = engine.run(signals, returns, panel)
+results = engine.run(signals, returns, panel, mask=panel.mask)
 ```
 
 ### 11.2 信号 → 持仓转换
 
 ```
-信号 s ∈ R^N → 截面排名 → top_quantile(=20%) 的股票等权做多
+信号 s ∈ R^N → 截面排名 → top_quantile(=20%) 的股票做多
 long_only=False 时: bottom_quantile 等权做空
 ```
 
-### 11.3 交易成本模型
+**仓位模式（v0.3.0 新增）**：`weight_mode` 决定候选股内部的权重分配：
+
+| 模式 | 说明 |
+|------|------|
+| `equal` | top-k 候选等权（原行为） |
+| `signal_zscore` | 按信号 z 分数加权（候选内），信号越强仓位越重 |
+
+### 11.3 交易制度约束（v0.3.0 新增）
+
+A 股的两条硬约束在回测层落实：
+
+1. **T+1**：日线收盘-收盘持仓结构下，t 日收盘建仓的头寸最早于 t+1 日收盘
+   平仓（持有满 1 日），T+1 约束结构性满足。
+2. **停牌/涨跌停成交约束**：`respect_mask_no_trade=True`（默认）时，mask=False
+   的交易日（停牌或触及涨跌停）既不能开仓也不能平仓——该资产持仓维持昨收、
+   不计换手与成本。信号选择阶段已把 masked 资产排除在建仓之外；此处补齐
+   "已持仓资产在跌停日卖不掉"这一半。
+
+**调仓频率（v0.3.0 新增）**：`rebalance_freq` 控制每 N 根 bar 才换一次仓，
+其间持仓不变、成本只在换仓日计提。实验 EXP-20260816-08 显示降频（freq=5）
+比信号平滑更有效地压换手且不衰减 IC（见第 13 章）。
+
+**信号平滑**：`signal_smoothing=λ` 用因果 EMA 平滑信号
+（s'_t = (1-λ)·s_t + λ·s'_{t-1}），降换手不引入 look-ahead；λ=0 等价原信号。
+
+### 11.4 交易成本模型
 
 ```
 总成本 = (tc_bps + slippage_bps) × turnover
 ```
 
-### 11.4 绩效指标（v0.2.1 口径）
+成本只在换仓日计提；停牌/涨跌停日持仓维持昨收不产生换手成本。
+
+### 11.5 绩效指标
 
 | 指标 | 公式 | 说明 |
 |------|------|------|
@@ -829,7 +893,7 @@ long_only=False 时: bottom_quantile 等权做空
 | **Hit Rate** | P(sign(signal) = sign(return)) | 方向准确率 |
 | **Turnover** | mean(\|Δw\|) | 真实仓位换手 |
 
-> **v0.2.1 修正**：IC 对齐统一为 **k→k+1**（signal[t] 预测 p[t+1]−p[t]）；
+> **v0.3.0 修正**：IC 对齐统一为 **k→k+1**（signal[t] 预测 p[t+1]−p[t]）；
 > val-IC 为**逐时步截面 rank IC**（旧为 pooled Pearson，ICIR/t-stat 退化）；
 > 回测换手率为**真实仓位换手**；MaxDD 为**净值百分比**回撤。
 
@@ -837,7 +901,7 @@ long_only=False 时: bottom_quantile 等权做空
 
 ## 12. 配置系统
 
-> **v0.2.1 澄清**：`configs/*.yaml` 为**参考死配置**，未接入运行脚本。
+> **v0.3.0 澄清**：`configs/*.yaml` 为**参考死配置**，未接入运行脚本。
 > 实际配置在各脚本的 `DEFAULT_CONFIG` 字典中。修改参数请直接改脚本内的
 > `DEFAULT_CONFIG`，或后续将 yaml 接线（见附录 C 待办）。
 
@@ -848,16 +912,26 @@ long_only=False 时: bottom_quantile 等权做空
 ### 13.1 新口径基线（2021-2025 日线，前复权，严格样本外）
 
 > 修复前全部实验数字作废（错列特征产物）。以下为通道契约与口径修复后的
-> 唯一有效数字，产物为 `outputs/EXP-20260816-*.json`。
+> 唯一有效数字，产物为 `outputs/EXP-20260816-*.json`，完整登记与 config hash
+> 见 `docs/EXPERIMENT_REGISTRY.md`。
 
 | 实验 | 变体 | IC | t | 净 Sharpe | 真实换手 | 结论 |
 |------|------|-----|---|-----------|----------|------|
-| EXP-20260816-02 | Ridge / 30股 | +0.0001 | +0.01 | −1.10 | 1.74 | 30 股无信号 |
-| EXP-20260816-03 | DAFT / 30股 | +0.0077 | +0.51 | −1.66 | 2.37 | 30 股同数量级 ≈0 |
+| EXP-20260816-02 | Ridge / 30股 | +0.0001 | +0.01 | −1.10 | 1.74 | 30 股无信号（股票池效应） |
+| EXP-20260816-03 | DAFT / 30股 quick | +0.0077 | +0.51 | −1.66 | 2.37 | 30 股同数量级 ≈0 |
 | EXP-20260816-04 | DAFT / 30股 平滑 λ*=0.7 | +0.0128 | +0.81 | −0.14 | 0.96 | 换手减半，Sharpe −1.66→−0.14 |
 | EXP-20260816-05 | **Ridge / 100股 hs300** | **+0.0482** | **+5.19** | **+0.53** | 1.85 | **基线即达 GO 线** |
 | EXP-20260816-06 | DAFT / 100股 quick | +0.0368 | +3.65 | −1.72 | 2.34 | 有信号，弱于 Ridge，换手吃收益 |
 | EXP-20260816-07 | DAFT / 100股 平滑 λ*=0.7 | +0.0274 | +2.36 | −0.60 | 0.98 | 换手减半，Sharpe 回升，仍输 Ridge |
+| EXP-20260816-08 | **DAFT / 100股 换手控制网格** | +0.0353 | +3.50 | **+0.25** | 0.63 | **freq=5+λ=0+分数仓位 → test 净 Sharpe 转正**；降频优于平滑 |
+| EXP-20260816-10 | DAFT / 100股 更强平滑 λ∈{0.7,0.8,0.9} | +0.0229 | +1.94 | −0.47 | 0.75 | 平滑越强 Sharpe 越高但 IC 衰减，平滑路线近极限 |
+| EXP-20260816-11 | DAFT / 100股 --full 训练 | +0.0251 | +2.51 | −1.33 | 2.15 | 更多训练无益（OOS IC 低于 quick 0.037），加训练量路线证伪 |
+| EXP-20260816-12 | Ridge / 100股 train 60% | +0.0482 | +5.19 | +0.56 | 1.83 | Ridge 对训练量不敏感（727 天即够） |
+| EXP-20260816-13 | DAFT / 100股 walk-forward 2折 | 0.030±0.025 | — | −1.09±0.55 | 2.20 | 折间极不稳：折1 IC 0.013 弱，折2 IC 0.048 ≈ Ridge |
+
+> EXP-20260816-01（新口径基线、baostock 瞬时失败致股票池不全）与
+> EXP-20260816-09（多窗口首跑崩于对齐 bug，已并入 EXP-13）为过程记录，
+> 上表从 02 起列有效结果。
 
 ### 13.2 关键发现
 
@@ -865,13 +939,20 @@ long_only=False 时: bottom_quantile 等权做空
    错列特征产物；且 30 股无信号本身是**股票池效应**（权重股同质 + 截面太小）。
 2. **100 股 hs300 真实成分 + 涨跌停 mask 下，Ridge IC=0.048 / t=5.19 /
    净 Sharpe=+0.53 — 基线即达预注册 GO 线。**
-3. DAFT 有信号（IC 0.037 / t 3.65）但弱于 Ridge 且换手更高；平滑 λ*=0.7
-   把换手 2.34→0.98、净 Sharpe −1.72→−0.60，降换手假设再次验证。
+3. DAFT 有信号（IC 0.035~0.037）但弱于 Ridge 且换手更高；换手控制
+   （freq=5 + 分数仓位）把净 Sharpe 拉到 **+0.25 转正**，仍低于线性基线。
+4. **加训练量证伪**：DAFT --full 训练 OOS IC 0.025 反低于 quick 0.037；
+   而 Ridge 对训练量不敏感（EXP-12）。DAFT 的训练量敏感在 walk-forward 折间
+   暴露（折1 727d IC 0.013 vs 折2 969d IC 0.048）。
 
 ### 13.3 判定预判
 
-**有条件 GO**（0.02 ≤ IC < 0.04 且打不过 Ridge）——需换手控制 + 信号增强 +
-成本真实性重测。完整迭代计划见 `docs/FIX_REPORT_20260816.md` 第 4 节。
+对照预注册判据（IC ≥ 0.04 且 t ≥ 2.0 = GO）：DAFT 典型 IC 0.035~0.037 落入
+"有条件 GO"区间，但**最优变体仍打不过 Ridge**（0.035 < 0.048），且换手控制
+后净 Sharpe +0.25 仍低于 Ridge +0.53 → **判定书草稿预判 NO-GO（架构）方向**。
+正式签字前保留三条推翻路径：长历史训练（EXP-13 折2 显示训练量足够时 DAFT
+≈ Ridge）、no-cdap/no-memory 消融归因、成本真实性重测。判定书见
+`docs/DECISION_20260930.md`。
 
 ---
 
@@ -936,7 +1017,7 @@ class MyRouter(RegimeRouter):
 | Stage3 epochs / LR | 10 / 1e-5 | 联合微调 |
 | Stage4 n_steps | 200 | 硬化收集 |
 | CDAP warmup | 3 epochs | scale 预热 |
-| sparsity_weight | 0.01 | 熵正则权重（v0.2.1 从 0.05 调低） |
+| sparsity_weight | 0.01 | 熵正则权重（v0.3.0 从 0.05 调低） |
 
 ### A.3 回测参数
 
@@ -961,8 +1042,11 @@ daft/
 ├── docs/
 │   ├── SPECIFICATION.md              # ★ 本文档 — 技术说明书
 │   ├── guided-tour.md                # 代码走读导览
-│   ├── FIX_REPORT_20260816.md        # v0.2.1 修复与重验报告
-│   ├── EXPERIMENT_REGISTRY.md        # 实验登记
+│   ├── FIX_REPORT_20260816.md        # v0.3.0 修复与重验报告
+│   ├── EXPERIMENT_REGISTRY.md        # 实验登记 & 预注册判据
+│   ├── ROADMAP.md                    # 路线图与挂起项
+│   ├── PROJECT_EVALUATION.md         # 项目评判评分卡
+│   ├── DECISION_20260930.md          # Go/No-Go 判定书（草稿）
 │   └── ...
 │
 ├── configs/                          # 参考死配置（未接线）
@@ -988,14 +1072,14 @@ daft/
 │   │   ├── cross_dim_attn.py         # [C3] CDAP
 │   │   ├── hardening.py              # [C4] AHM
 │   │   ├── ensemble.py               # ExpertEnsemble
-│   │   ├── factory.py                # ★ 模型工厂（v0.2.1 新增）
+│   │   ├── factory.py                # ★ 模型工厂（v0.3.0 新增）
 │   │   └── experts/                  # 5 类专家
 │   │       ├── base_expert.py
 │   │       ├── trend_expert.py
 │   │       ├── reversal_expert.py
 │   │       ├── volatility_expert.py
 │   │       ├── event_expert.py
-│   │       └── momentum_expert.py    # ★ v0.2.1 新增
+│   │       └── momentum_expert.py    # ★ v0.3.0 新增
 │   │
 │   ├── training/
 │   │   ├── expert_trainer.py         # Stage 1
@@ -1007,7 +1091,7 @@ daft/
 │   └── utils/                        # metrics.py, device.py
 │
 ├── scripts/                          # 运行脚本（DEFAULT_CONFIG 为准）
-└── tests/                            # 384 passed / 1 skipped
+└── tests/                            # 396 项测试
 ```
 
 ---
@@ -1020,15 +1104,20 @@ daft/
    10 个专家几乎均匀激活，MoE 退化为普通 ensemble。可能的解决方向：降低
    Top-K、添加熵正则、在真实行情数据上测试、curriculum learning 降温度。
 
-2. **top-3 稀疏未真正落实** — 专家池为**稠密软门控**（所有专家都计算，
-   软概率加权融合），"Top-K 稀疏"目前只是声明。需真正实现稀疏计算，或
-   把文档声明改为稠密软门控。
+2. **top-3 稀疏未真正落实（挂起）** — 专家池为**稠密软门控**（所有专家都计算，
+   软概率加权融合），"Top-K 稀疏"目前只是声明。**决策：挂起**，稠密软门控可跑通
+   实验，稀疏是推理优化，判定后再决定（见 ROADMAP 挂起项）。
 
-3. **AHM 未接线** — `detect_regime_shift` / `evict` 在生产管线中的调用未完成，
-   默认禁用。需接线或正式标记研究性/删除。
+3. **AHM 未接线（挂起，默认禁用）** — `detect_regime_shift` / `evict` 在生产
+   管线中的调用未完成。**决策：挂起**，推理加速不应先于信号验证。
 
 4. **legacy 因子 / FFT 未接入** — 35 个 legacy 因子和 FFT 频域特征是独立模块，
    不参与训练/评估。需接入或明确其定位。
+
+5. **residual-gate-port 分支挂起** — `feat/residual-gate-port`（记忆门收缩先验
+   CP1-CP11）的数学推理部分与 v0.3.0 CDAP logit 空间修复冲突。**决策：挂起，
+   不移植**，数学实现保留不动；移植条件是 M5 判定为 GO 或有条件 GO 后按新架构
+   重做。
 
 ### C.2 已修复（历史记录）
 
@@ -1036,28 +1125,32 @@ daft/
   通过修复 safe_gate 与 route_modulate 的梯度断路解决。
 - **通道契约错列** — 2026-08-16 通过 base_features.py::ensure_base_panel 解决。
 - **n_experts 不一致崩溃** — 2026-08-16 通过 factory.py 单一入口 + 一致性 assert 解决。
+- **涨跌停 mask + hs300 成分股池** — 2026-08-16（v0.3.0），见 4.6。
+- **交易制度约束（T+1 / 成交约束 / 调仓频率 / 分数仓位）** — 2026-08-16（v0.3.0），见 11.3。
 
 ### C.3 待实现功能
 
 | 功能 | 说明 | 优先级 |
 |------|------|--------|
+| 消融归因 | no-cdap / no-memory 组件贡献归因 | 高（NO-GO 签字前） |
+| 长历史训练验证 | 训练量足够时 DAFT ≈ Ridge 的路径复核（EXP-13 折2） | 高（NO-GO 签字前） |
+| 成本真实性重测 | 冲击模型（T+1/涨跌停已做，剩按 ADV 的冲击） | 高（NO-GO 签字前） |
 | 配置系统接线 | configs/*.yaml 接入脚本 | 中 |
 | 换手率约束 | 组合优化加 turnover constraint | 中 |
-| 成本真实化 | T+1 / 涨跌停成交 / 冲击模型 | 高（有条件 GO 前提） |
-| 多窗口 walk-forward | 单一 2021-2025 窗口结论不稳 | 高 |
-| top-3 稀疏 | 真正实现专家稀疏计算 | 中 |
+| top-3 稀疏 | 真正实现专家稀疏计算（判定后） | 低 |
 
 ### C.4 未来方向
 
-- 扩池到 300 股（当前 100 股 hs300 基线已达标）
-- 实现 multi-frequency 特征（15min / 30min / 60min）
+- 若 **GO**：扩池到 300 股、Markowitz 组合优化接入、分钟级中频（见 ROADMAP v0.4/v0.5）
+- 若 **NO-GO**：转型"LLM 架构金融化改造"研究项目，保留 CDAP/KDA 架构作研究载体，
+  面向论文/比赛/教学，停止交易系统投入
 - 与 Time-MoE (ICLR 2025) 做系统性的样本外对比
-- 跨仓库合并 `feat/residual-gate-port` 分支的 residual_gate 改动
+- `feat/residual-gate-port` 在判定为 GO 后按新架构重做移植（见 C.1-5）
 
 ---
 
 > **DAFT: Dimension-Aware Financial Trading**
 > Author: Alastair (Dongxu Jiang)
 > GitHub: [github.com/Alastair-Jiang/Dongxu-Jiang-daft](https://github.com/Alastair-Jiang/Dongxu-Jiang-daft)
-> Version: v0.2.1 · License: MIT
+> Version: v0.3.0 · License: MIT
 > Inspired by Kimi K3 (Moonshot AI, July 2026)
