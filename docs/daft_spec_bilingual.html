@@ -1,0 +1,1819 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAFT — Technical Specification · 技术说明书 v0.3.0</title>
+<style>
+  /* ============================================================
+     DAFT Technical Specification — Jane Street–style typography
+     极简 · 克制 · 数学严谨 · 中英双语对照
+     ============================================================ */
+  :root {
+    --ink:        #16181d;   /* 正文近黑 */
+    --ink-soft:   #3c434f;   /* 次级文字 */
+    --heading:    #0b2b4a;   /* 标题深蓝黑 */
+    --accent:     #0a6b8f;   /* 强调青蓝 */
+    --accent-ink: #084f6b;
+    --en:         #495467;   /* 英文段落灰蓝 */
+    --muted:      #7a8394;   /* 弱化文字 */
+    --rule:       #e3e7ee;   /* 分隔线 */
+    --rule-soft:  #edf0f5;
+    --code-bg:    #f6f7f9;   /* 代码块背景 */
+    --th-bg:      #eef2f6;   /* 表头背景 */
+    --cover-bg:   #0b2b4a;   /* 封面深蓝 */
+  }
+
+  @page {
+    size: A4;
+    margin: 22mm 19mm 21mm 19mm;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", -apple-system, "PingFang SC",
+                 "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.72;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* ---------- 封面 ---------- */
+  .cover {
+    background: var(--cover-bg);
+    color: #fff;
+    min-height: 96vh;
+    padding: 22mm 19mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    page-break-after: always;
+  }
+  .cover .kicker {
+    font-size: 10pt;
+    letter-spacing: .32em;
+    text-transform: uppercase;
+    color: #7fb3cf;
+    font-weight: 600;
+  }
+  .cover h1 {
+    font-size: 40pt;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    line-height: 1.05;
+    margin: 6mm 0 3mm;
+  }
+  .cover .subtitle {
+    font-size: 13pt;
+    color: #cfe0ec;
+    line-height: 1.6;
+    max-width: 150mm;
+  }
+  .cover .subtitle .cn { display: block; color: #eaf2f7; margin-top: 2mm; }
+  .cover .meta {
+    border-top: 1px solid rgba(255,255,255,.22);
+    padding-top: 5mm;
+    font-size: 10pt;
+    color: #a9c3d5;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 3mm;
+  }
+  .cover .meta b { color: #fff; font-weight: 600; }
+
+  /* ---------- 元信息块 ---------- */
+  .doc-meta {
+    margin: 0 0 10mm;
+    font-size: 9pt;
+    color: var(--muted);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 5mm;
+  }
+  .doc-meta .row { display: flex; gap: 6mm; flex-wrap: wrap; }
+  .doc-meta b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- 目录 ---------- */
+  nav.toc {
+    page-break-after: always;
+    margin-bottom: 8mm;
+  }
+  nav.toc h2 {
+    font-size: 15pt; color: var(--heading);
+    border-bottom: 2px solid var(--heading);
+    padding-bottom: 2mm; margin-bottom: 5mm;
+  }
+  nav.toc ol { list-style: none; }
+  nav.toc li {
+    display: flex; justify-content: space-between;
+    padding: 1.1mm 0; border-bottom: 1px dotted var(--rule-soft);
+    font-size: 10pt;
+  }
+  nav.toc li.l1 { font-weight: 600; color: var(--ink); }
+  nav.toc li.l2 { padding-left: 8mm; color: var(--ink-soft); }
+  nav.toc li .en { color: var(--muted); font-weight: 400; margin-left: 2mm; }
+
+  /* ---------- 章节 ---------- */
+  h1.chapter {
+    font-size: 20pt;
+    color: var(--heading);
+    font-weight: 700;
+    letter-spacing: -.01em;
+    border-bottom: 2.5px solid var(--heading);
+    padding-bottom: 2.5mm;
+    margin: 14mm 0 5mm;
+    page-break-after: avoid;
+  }
+  h1.chapter .num { color: var(--accent); margin-right: 3mm; }
+  h1.chapter .en {
+    display: block; font-size: 11.5pt; font-weight: 500;
+    color: var(--muted); margin-top: 1mm; letter-spacing: 0;
+  }
+
+  h2 {
+    font-size: 13pt; color: var(--heading); font-weight: 700;
+    margin: 7mm 0 2.5mm;
+    page-break-after: avoid;
+  }
+  h2 .en { color: var(--muted); font-weight: 500; font-size: 10pt; margin-left: 2mm; }
+
+  h3 {
+    font-size: 11pt; color: var(--accent-ink); font-weight: 700;
+    margin: 5mm 0 1.8mm;
+    page-break-after: avoid;
+  }
+
+  p { margin: 0 0 2.6mm; text-align: justify; }
+
+  /* 英文对照段：灰蓝 + 左侧细线 + 缩进 */
+  p.en {
+    color: var(--en);
+    margin: -1mm 0 3mm 4mm;
+    padding-left: 3.5mm;
+    border-left: 1.5px solid var(--rule);
+    font-size: 9.8pt;
+    line-height: 1.62;
+  }
+
+  strong { font-weight: 700; color: var(--ink); }
+  em { font-style: normal; color: var(--accent-ink); font-weight: 600; }
+
+  code {
+    font-family: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+    font-size: 8.8pt;
+    background: var(--code-bg);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: .2mm 1.2mm;
+    color: #24304a;
+  }
+
+  pre {
+    font-family: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+    font-size: 8.6pt;
+    line-height: 1.5;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 3mm 4mm;
+    margin: 2.5mm 0 4mm;
+    overflow-x: auto;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+  /* 数学公式块 */
+  .math {
+    font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+    font-size: 10pt;
+    color: #1d2740;
+    display: block;
+    text-align: center;
+    margin: 2.5mm auto 3.5mm;
+    page-break-inside: avoid;
+  }
+  .math.inline { display: inline; text-align: left; margin: 0; font-size: 9.6pt; }
+
+  /* ---------- 表格 ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2.5mm 0 4.5mm;
+    font-size: 9.2pt;
+    page-break-inside: avoid;
+  }
+  th {
+    background: var(--th-bg);
+    color: var(--heading);
+    font-weight: 700;
+    text-align: left;
+    padding: 1.8mm 2.2mm;
+    border: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  th .en { display: block; font-weight: 500; color: var(--muted); font-size: 8pt; }
+  td {
+    padding: 1.6mm 2.2mm;
+    border: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafbfc; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* 引用 / 注释块 */
+  .note {
+    background: #f3f8fb;
+    border-left: 3px solid var(--accent);
+    padding: 2.5mm 3.5mm;
+    margin: 2.5mm 0 4mm;
+    font-size: 9.2pt;
+    color: var(--ink-soft);
+    page-break-inside: avoid;
+  }
+  .note .en { display: block; color: var(--en); margin-top: 1mm; font-size: 8.8pt; }
+
+  ul, ol { margin: 0 0 3mm 6mm; }
+  li { margin-bottom: 1.2mm; }
+  li .en { color: var(--en); }
+
+  /* 页脚 */
+  .footer {
+    margin-top: 10mm;
+    padding-top: 3mm;
+    border-top: 1px solid var(--rule);
+    font-size: 8.5pt;
+    color: var(--muted);
+    display: flex; justify-content: space-between;
+  }
+
+  /* ---------- 工程图 (SVG) ---------- */
+  figure.diagram {
+    margin: 4mm 0 8mm;
+    page-break-inside: avoid;
+    text-align: center;
+  }
+  figure.diagram svg {
+    display: block;
+    margin: 0 auto;
+  }
+  figure.diagram figcaption {
+    font-size: 8.8pt;
+    color: var(--muted);
+    margin-top: 2.2mm;
+    text-align: center;
+    line-height: 1.55;
+  }
+  figure.diagram figcaption b { color: var(--heading); }
+  figure.diagram figcaption .en { color: var(--en); }
+
+  /* SVG 工程图共用元素 */
+  svg.diag { font-family: "Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  svg.diag text { dominant-baseline: middle; text-anchor: middle; }
+  svg.diag .mono { font-family: "Cascadia Code",Consolas,monospace; }
+  svg.diag .bx      { fill:#ffffff; stroke:#0b2b4a; stroke-width:1.3; }
+  svg.diag .bx-fill { fill:#0b2b4a; stroke:#0b2b4a; stroke-width:1.3; }
+  svg.diag .bx-acc  { fill:#0a6b8f; stroke:#0a6b8f; stroke-width:1.3; }
+  svg.diag .bx-soft { fill:#eef3f8; stroke:#c9d6e4; stroke-width:1; }
+  svg.diag .tns     { fill:#f7f8fa; stroke:#dfe4ec; stroke-width:1; }
+  svg.diag .edge    { stroke:#8a94a5; stroke-width:1.3; fill:none; }
+  svg.diag .edge-a  { stroke:#0a6b8f; stroke-width:1.6; fill:none; }
+  svg.diag .mk      { fill:#8a94a5; }
+  svg.diag .mk-a    { fill:#0a6b8f; }
+  svg.diag .tt      { font-size:13px; font-weight:700; fill:#0b2b4a; }
+  svg.diag .tt-w    { font-size:12.5px; font-weight:700; fill:#ffffff; }
+  svg.diag .lb      { font-size:12px; fill:#16181d; }
+  svg.diag .lb-w    { font-size:11.5px; fill:#ffffff; }
+  svg.diag .lb-mut  { font-size:10.5px; fill:#5b6472; }
+  svg.diag .sh      { font-size:10px; fill:#7a8394; }
+  svg.diag .eq      { font-size:11.5px; fill:#0a6b8f; font-weight:700; }
+  svg.diag .grp     { fill:none; stroke:#d5dce6; stroke-width:1; stroke-dasharray:4 3; }
+</style>
+</head>
+<body>
+
+<!-- ==================== 封面 ==================== -->
+<section class="cover">
+  <div>
+    <div class="kicker">Dimension-Aware Financial Trading</div>
+    <h1>DAFT</h1>
+    <div class="subtitle">
+      Cross-Dimension Attention Architecture for Medium-Frequency Quantitative Trading
+      <span class="cn">面向中频量化交易的跨维度注意力架构 · 技术说明书</span>
+    </div>
+  </div>
+  <div class="meta">
+    <span><b>Version</b> v0.3.0</span>
+    <span><b>Date</b> 2026-08-16</span>
+    <span><b>Author</b> Alastair (Dongxu Jiang)</span>
+    <span><b>License</b> MIT</span>
+    <span><b>Inspired by</b> Kimi K3 (Moonshot AI, 2026)</span>
+  </div>
+</section>
+
+<!-- ==================== 元信息 ==================== -->
+<div class="doc-meta">
+  <div class="row">
+    <span><b>Document</b> Technical Specification · 技术说明书</span>
+    <span><b>Scope</b> 截至 2026-08-16 的 DAFT 仓库状态（PR #9 修复 + 全面升级）</span>
+  </div>
+  <div class="row" style="margin-top:1.5mm;">
+    <span><b>Language</b> 中文为主 · English translation follows each paragraph</span>
+    <span><b>Companion</b> docs/EXPERIMENT_REGISTRY.md · docs/DECISION_20260930.md</span>
+  </div>
+</div>
+
+<!-- ==================== 目录 ==================== -->
+<nav class="toc">
+  <h2>目录 · Contents</h2>
+  <ol>
+    <li class="l1"><span>版本演进 <span class="en">Version History</span></span></li>
+    <li class="l1"><span>1. 项目概览 <span class="en">Project Overview</span></span></li>
+    <li class="l1"><span>2. 灵感来源：Kimi K3 → 金融时序 <span class="en">From Kimi K3 to Financial Time Series</span></span></li>
+    <li class="l1"><span>3. 系统架构 <span class="en">System Architecture</span></span></li>
+    <li class="l1"><span>4. 数据层 <span class="en">Data Layer</span></span></li>
+    <li class="l1"><span>5. 特征工程 <span class="en">Feature Engineering</span></span></li>
+    <li class="l1"><span>6. 核心模型 <span class="en">Core Models</span></span></li>
+    <li class="l1"><span>7. 专家池 <span class="en">Expert Pool</span></span></li>
+    <li class="l1"><span>8. 集成层与模型工厂 <span class="en">Ensemble Layer &amp; Model Factory</span></span></li>
+    <li class="l1"><span>9. 训练管线 <span class="en">Training Pipeline</span></span></li>
+    <li class="l1"><span>10. 组合优化 <span class="en">Portfolio Optimization</span></span></li>
+    <li class="l1"><span>11. 回测引擎 <span class="en">Backtest Engine</span></span></li>
+    <li class="l1"><span>12. 配置系统 <span class="en">Configuration System</span></span></li>
+    <li class="l1"><span>13. 实验结果 <span class="en">Experimental Results</span></span></li>
+    <li class="l1"><span>14. 扩展指南 <span class="en">Extension Guide</span></span></li>
+    <li class="l1"><span>附录 A. 完整参数列表 <span class="en">Appendix A. Full Parameter List</span></span></li>
+    <li class="l1"><span>附录 B. 文件结构索引 <span class="en">Appendix B. File Structure Index</span></span></li>
+    <li class="l1"><span>附录 C. 已知问题和 TODO <span class="en">Appendix C. Known Issues &amp; TODO</span></span></li>
+    <li class="l1"><span>附录 D. 运行逻辑工程图 <span class="en">Appendix D. Runtime Logic Diagrams</span></span></li>
+  </ol>
+</nav>
+
+<!-- ==================== 版本演进 ==================== -->
+<h1 class="chapter"><span class="num">·</span>版本演进 <span class="en">Version History</span></h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>版本 <span class="en">Version</span></th>
+      <th>日期 <span class="en">Date</span></th>
+      <th>里程碑 <span class="en">Milestone</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="num">v0.1.0</td>
+      <td>2026-07</td>
+      <td>核心架构（MoE 专家池 + Regime Router + KDA Memory + CDAP + AHM）</td>
+    </tr>
+    <tr>
+      <td class="num">v0.2.0</td>
+      <td>2026-08-06/07</td>
+      <td>全管道打通，消除所有 <code>NotImplementedError</code></td>
+    </tr>
+    <tr>
+      <td class="num"><strong>v0.3.0</strong></td>
+      <td>2026-08-16</td>
+      <td><strong>工程修复（PR #9）+ 全面升级</strong>：通道契约/口径统一/10 专家、工厂去重、涨跌停 mask、hs300 成分股池、交易制度约束</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>v0.3.0 是一次<strong>工程修复 + A 股口径升级</strong>，不含架构变更。修复批次（PR #9）修正了早期实现与文档的多处出入——最严重的是<strong>数据通道错列</strong>（数据源的 OHLCV 被特征引擎当作基础特征读取），此前所有实验的 s_t 都建立在错列之上。全面升级进一步补齐 A 股交易制度（涨跌停 mask、T+1 成交约束、调仓频率与分数仓位）、把股票池从 50 只内置样本升级到 hs300 真实成分，并完成扩池重测与稳健性验证。本说明书以 v0.3.0 的真实实现为准。</p>
+<p class="en">v0.3.0 is an <em>engineering-repair plus A-share convention upgrade</em>, with no architectural change. The repair batch (PR #9) corrected several divergences between the early implementation and its documentation — most critically the <em>data-channel misalignment</em>, where the source OHLCV columns were read by the feature engine as base features, so every prior experiment's s_t was built on misaligned columns. The upgrade further enforces A-share trading conventions (price-limit mask, T+1 fill constraint, rebalance frequency, signal-scaled positions), upgrades the stock universe from a built-in 50-name sample to the real hs300 constituents, and completes the enlarged-universe re-test and robustness verification. This document reflects the actual v0.3.0 implementation.</p>
+
+<!-- ==================== 1. 项目概览 ==================== -->
+<h1 class="chapter"><span class="num">1</span>项目概览 <span class="en">Project Overview</span></h1>
+
+<h2>1.1 一句话定义 <span class="en">One-line Definition</span></h2>
+
+<p>DAFT 是一套受 <strong>Kimi K3</strong>（Moonshot AI，2026 年 7 月，2.8T 参数开源大模型）启发的 PyTorch 量化交易模型。核心创新是让 <strong>路由（Router）、记忆（Memory）、特征深度（Depth）</strong> 三个信息维度在共享的联合潜空间中<strong>互相调制</strong>，形成闭环决策引擎，而不是像传统系统那样各自独立运行。</p>
+<p class="en">DAFT is a PyTorch quantitative-trading model inspired by <em>Kimi K3</em> (Moonshot AI, July 2026, a 2.8T-parameter open-source model). Its core innovation is to make three information dimensions — <em>routing</em>, <em>memory</em>, and <em>feature depth</em> — modulate one another in a shared joint latent space, forming a closed-loop decision engine rather than running independently as in conventional systems.</p>
+
+<h2>1.2 设计目标 <span class="en">Design Objectives</span></h2>
+
+<table>
+  <thead>
+    <tr><th>维度 <span class="en">Dimension</span></th><th>指标 <span class="en">Target</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>交易频率 <span class="en">Frequency</span></td><td>中频（分钟级到日频）· medium-frequency (minute to daily)</td></tr>
+    <tr><td>资产类别 <span class="en">Asset class</span></td><td>A 股（可扩展到任意股票池）· A-shares, extensible to any universe</td></tr>
+    <tr><td>模型规模 <span class="en">Model size</span></td><td>核心 ≈31.5 万参数（轻量，可研究迭代）· ~315K core params</td></tr>
+    <tr><td>推理效率 <span class="en">Inference</span></td><td>硬化后常见行情 O(1) 快路径（研究性）· hardened O(1) fast path</td></tr>
+    <tr><td>硬件需求 <span class="en">Hardware</span></td><td>Mac Mini M4 / ThinkBook 14+ 可训练</td></tr>
+    <tr><td>可扩展性 <span class="en">Extensibility</span></td><td>专家、数据源、路由策略均可插拔替换</td></tr>
+  </tbody>
+</table>
+
+<h2>1.3 与现有方案的区别 <span class="en">What DAFT Advances</span></h2>
+
+<table>
+  <thead>
+    <tr><th>方案 <span class="en">Baseline</span></th><th>DAFT 超越了什么 <span class="en">What DAFT advances</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Time-MoE</strong> (ICLR 2025)</td><td>MoE 路由把记忆当被动状态；DAFT 让路由主动调制记忆的遗忘策略。</td></tr>
+    <tr><td><strong>Dynamic TMoE</strong> (ICML 2026)</td><td>专家池适应分布漂移，但专家选择从不反过来影响记忆保留。</td></tr>
+    <tr><td><strong>KDA</strong> (Kimi, 2025)</td><td>Per-channel forget gate 只依赖当前输入；DAFT 加了路由信号和深度信号的调制。</td></tr>
+    <tr><td><strong>AttnRes</strong> (K3, 2026)</td><td>跨层注意力权重不考虑路由分布和记忆状态；DAFT 让三者互相耦合。</td></tr>
+    <tr><td><strong>PatchTST / TimesNet / iTransformer</strong></td><td>单模型单行情，无专家专业化。</td></tr>
+  </tbody>
+</table>
+
+<p><strong>核心差距：没有现有系统允许路由决策改变记忆策略，或让记忆状态改变对特征层的信任权重。DAFT 填补了这个空白。</strong></p>
+<p class="en"><em>Core gap: no existing system lets a routing decision change the memory policy, or lets the memory state change the trust weight assigned to the feature layers. DAFT fills that gap.</em></p>
+
+<h2>1.4 核心指标 <span class="en">Key Metrics</span></h2>
+
+<table>
+  <thead>
+    <tr><th>指标 <span class="en">Metric</span></th><th>数值 <span class="en">Value</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>专家数 <span class="en">Experts</span></td><td>10（5 类 × 2 实例）· 10 (5 types × 2 instances)</td></tr>
+    <tr><td>总参数 <span class="en">Parameters</span></td><td>核心 ≈31.5 万；含 layer_proj ≈41.7 万</td></tr>
+    <tr><td>测试套件 <span class="en">Test suite</span></td><td>396 项（pytest collected）</td></tr>
+    <tr><td>特征提取速度 <span class="en">Feature speed</span></td><td>2.0s（500 天 × 20 股，日频）</td></tr>
+    <tr><td>内存状态大小 <span class="en">Memory state</span></td><td>128 × 64 = 8,192 float32 ≈ 32 KB</td></tr>
+    <tr><td>每步推理复杂度 <span class="en">Per-step cost</span></td><td>O(d_k · d_v) = O(8192)，与序列长度无关</td></tr>
+  </tbody>
+</table>
+
+<!-- ==================== 2. 灵感来源 ==================== -->
+<h1 class="chapter"><span class="num">2</span>灵感来源：Kimi K3 → 金融时序 <span class="en">From Kimi K3 to Financial Time Series</span></h1>
+
+<p>DAFT 不是凭空设计的。三个核心组件各有一个 Kimi K3 的对应物，每次映射都做了领域适配。</p>
+<p class="en">DAFT is not designed in a vacuum. Each of its three core components has a Kimi K3 counterpart, and every mapping applies a domain-specific adaptation.</p>
+
+<h2>2.1 K3 → DAFT 映射表 <span class="en">K3 → DAFT Mapping</span></h2>
+
+<table>
+  <thead>
+    <tr><th>K3 组件 <span class="en">K3 Component</span></th><th>K3 实现 <span class="en">In K3</span></th><th>DAFT 映射 <span class="en">DAFT Mapping</span></th><th>关键适配 <span class="en">Key Adaptation</span></th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Stable LatentMoE</strong></td>
+      <td>896 专家，16 激活，潜空间路由 + Quantile Balancing</td>
+      <td>10 策略专家，Top-3 激活，regime 潜空间 (R^16)</td>
+      <td>给专家赋予金融语义：趋势/反转/波动率/事件/动量</td>
+    </tr>
+    <tr>
+      <td><strong>KDA</strong></td>
+      <td>Per-channel forget gate (α_t)，delta-rule 状态更新 (S_t)，3:1 KDA-to-MLA 层比例</td>
+      <td>Per-slot forget gate，路由调制遗忘 (α'_t)，固定大小市场记忆 (M_t ∈ R^{128×64})</td>
+      <td>路由信号调制遗忘门；无位置编码（市场时间非均匀）</td>
+    </tr>
+    <tr>
+      <td><strong>AttnRes</strong></td>
+      <td>跨层注意力 over [h_0, …, h_{l-1}]</td>
+      <td>跨层检索 over 因子层次 (L0 raw → L1 base → L2 composite)</td>
+      <td>深度权重对记忆状态敏感（CDAP 连接）</td>
+    </tr>
+    <tr>
+      <td><strong>SiTU 激活</strong></td>
+      <td>σ(x) ⊙ tanh(x)，自然输出界 [-1, 1]</td>
+      <td>专家输出激活，确保多空信号量级可比</td>
+      <td>防止 MoE 门控融合前输出量级漂移</td>
+    </tr>
+    <tr>
+      <td><strong>3:1 混合比例</strong></td>
+      <td>静态：3 KDA 层配 1 MLA 全注意力层</td>
+      <td><strong>动态：AHM 学习的快/慢路径比例</strong></td>
+      <td><strong>DAFT 原创扩展</strong>：比例随行情自适应</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>2.2 DAFT 的原创扩展 <span class="en">DAFT's Original Extension</span></h2>
+
+<p>DAFT 做了 K3 没有的一件事：<strong>让三个组件互相通信</strong>。</p>
+<p class="en">DAFT does one thing K3 does not: <em>it makes the three components talk to each other.</em></p>
+
+<ul>
+  <li><strong>K3 的局限</strong>：MoE routing、KDA forget gate、AttnRes retrieval 是三个孤岛——各自做决策，互不知晓。
+    <span class="en">K3's limitation: MoE routing, the KDA forget gate, and AttnRes retrieval are three islands — each decides independently, unaware of the others.</span></li>
+  <li><strong>DAFT 的方案</strong>：CDAP（Cross-Dimension Attention Protocol）建立一个 64 维联合潜空间，三个维度的信号投影进去，逐元素乘法融合，再反向投影回各自组件。
+    <span class="en">DAFT's approach: CDAP establishes a 64-dim joint latent space; the three signals are projected in, fused by element-wise multiplication, and projected back out to each component.</span></li>
+  <li><strong>AHM（Adaptive Hardening）</strong> 进一步把 K3 的静态 3:1 比例替换成数据驱动的动态路由——常见行情走硬化快路径，罕见行情降级回完整 CDAP 计算。
+    <span class="en">AHM further replaces K3's static 3:1 ratio with data-driven dynamic routing — routine regimes take a hardened fast path; rare regimes fall back to full CDAP computation.</span></li>
+</ul>
+
+<!-- ==================== 3. 系统架构 ==================== -->
+<h1 class="chapter"><span class="num">3</span>系统架构 <span class="en">System Architecture</span></h1>
+
+<h2>3.1 完整数据流 <span class="en">End-to-End Data Flow</span></h2>
+
+<pre>市场数据 (OHLCV)  Market Data
+        │
+        ▼
+通道契约 ensure_base_panel   Channel Contract  ← 唯一转换点 / single conversion point
+        │   OHLCV → [close, log_return, volume, volume_ratio, volatility_20]
+        ▼
+特征引擎 Feature Engine   35 经典因子 · FFT 频域 · Regime 特征 → s_t ∈ R^200
+        │
+        ▼
+L0 原始数据 → L1 基础因子 → L2 复合特征   (three factor levels)
+        │
+        ▼
+CDAP 三维互调   Router ⇄ Memory ⇄ Depth    j = e ⊙ m ⊙ d  (R^64)
+        │
+        ▼
+Hardening Engine   研究性，默认禁用   research-only, disabled by default
+        │
+        ▼
+Expert Ensemble   10 专家加权融合 → 交易信号   trading signal
+        │
+        ▼
+Portfolio Optim (Markowitz)  →  Backtest Engine (矢量化回测)</pre>
+
+<h2>3.2 组件关系 <span class="en">Component Map</span></h2>
+
+<p>系统由 <strong>4 个核心模型组件</strong> + <strong>5 类策略专家（10 实例）</strong> + <strong>4 阶段训练管线</strong> 组成：</p>
+<p class="en">The system consists of <em>4 core model components</em> + <em>5 strategy-expert types (10 instances)</em> + a <em>4-stage training pipeline</em>:</p>
+
+<pre>DAFT/
+├── 数据层   Data        Panel(T×N×F) + 通道契约 ensure_base_panel + 适配器 Baostock/YFinance
+├── 特征层   Features    5 个特征提取器 → s_t ∈ R^200 + 3 层特征 [h0, h1, h2]
+├── 模型层   Models      [C1] RegimeRouter → [C2] KDA Market Memory → [C3] CDAP
+│                        → [C4] AHM → ExpertEnsemble
+│                        └── factory.py 单一权威构建入口 / single authoritative builder
+├── 训练层   Training    4 阶段：独立专家 → Router+Memory → 联合微调 → 硬化收集
+├── 组合层   Portfolio   Markowitz 均值-方差 + Ledoit-Wolf 收缩
+└── 回测层   Backtest    矢量化回测 + 成本模型 + 绩效指标</pre>
+
+<!-- ==================== 4. 数据层 ==================== -->
+<h1 class="chapter"><span class="num">4</span>数据层 <span class="en">Data Layer</span></h1>
+
+<h2>4.1 Panel 数据结构 <span class="en">The Panel Data Structure</span></h2>
+
+<p>DAFT 使用三维 Panel 表示市场数据，统一接口解耦数据源和模型。</p>
+<p class="en">DAFT represents market data as a three-dimensional Panel, whose uniform interface decouples data sources from the model.</p>
+
+<pre>@dataclass
+class Panel:
+    values: torch.Tensor     # (T, N, F) — 时间 × 资产 × 特征
+    mask: torch.Tensor       # (T, N), bool — 可交易性掩码 / tradability mask
+    dates: Optional[list]    # T 个日期标签
+    asset_ids: Optional[list] # N 个资产标识
+    feature_names: Optional[list] # F 个特征名称
+    metadata: Optional[dict] # 数据源、频率、生成参数</pre>
+
+<p><strong>Mask</strong> 的作用：标记停牌、涨跌停板等不可交易状态，在训练和回测中被自动跳过。A 股口径下，mask 由两部分合成：<code>close</code> 有效性（NaN → 停牌/缺失，置 False）与涨跌停检测（<code>_limit_move_mask</code>，见 4.6）。</p>
+<p class="en"><em>Mask</em> marks untradable states (suspension, price-limit) so they are automatically skipped in training and backtest. Under A-share conventions the mask is the conjunction of two parts: <code>close</code> validity (NaN → suspended/missing, set False) and price-limit detection (<code>_limit_move_mask</code>, §4.6).</p>
+
+<h2>4.2 通道契约 <span class="en">Channel Contract ★</span></h2>
+
+<p>数据源与特征引擎之间存在<strong>两种不同的通道布局</strong>，历史上被直接混用，导致特征错列：</p>
+<p class="en">There are <em>two distinct channel layouts</em> between the data source and the feature engine, historically mixed directly, which caused feature misalignment:</p>
+
+<pre>数据源产出 (baostock / yfinance / synthetic):
+    ["open", "high", "low", "close", "volume"]          ← OHLCV 布局 / layout
+
+特征引擎需要 (RegimeFeatureExtractor / legacy / Freq):
+    ["close", "log_return", "volume", "volume_ratio", "volatility_20"]  ← 基础布局 / base layout</pre>
+
+<p>修复方案：新增 <code>src/daft/features/base_features.py</code> 作为<strong>唯一转换点</strong>，所有特征引擎入口必须首先调用 <code>ensure_base_panel</code>。</p>
+<p class="en">The fix adds <code>src/daft/features/base_features.py</code> as the <em>single conversion point</em>; every feature-engine entry must first call <code>ensure_base_panel</code>.</p>
+
+<pre>from daft.features.base_features import ensure_base_panel
+panel = ensure_base_panel(panel)   # OHLCV → 基础特征布局</pre>
+
+<p>转换规则（严格因果 + mask 感知）：</p>
+<p class="en">Conversion rules (strictly causal + mask-aware):</p>
+
+<ul>
+  <li><code>log_return[t] = log(close[t]) - log(close[t-1])</code>（需 t 与 t-1 均可交易）
+    <span class="en">(requires both t and t-1 tradable)</span></li>
+  <li><code>volume_ratio[t] = volume[t] / 滚动20日均量</code> <span class="en">/ 20-day rolling mean volume</span></li>
+  <li><code>volatility_20[t] = log_return 的滚动20日标准差</code> <span class="en">/ 20-day rolling std of log_return</span></li>
+</ul>
+
+<p>若布局既不是 OHLCV 也不是基础布局，则<strong>抛出明确错误</strong>（失败要响亮，不再静默错列）。</p>
+<p class="en">If the layout is neither OHLCV nor base, an <em>explicit error is raised</em> — fail loudly rather than silently misaligning.</p>
+
+<h2>4.3 DataLoader 接口 <span class="en">DataLoader Interface</span></h2>
+
+<pre># 合成数据（测试/快速实验用）
+from daft.data.loaders import SyntheticDataLoader
+loader = SyntheticDataLoader(n_stocks=20, n_days=500, freq="daily")
+panel = loader.load()
+
+# 真实 A 股数据
+from daft.data.loaders import BaostockDataLoader
+loader = BaostockDataLoader(symbols=["sh.600000", "sz.000001"],
+                            start="2022-01-01", end="2024-12-31")
+panel = loader.load()</pre>
+
+<h2>4.4 数据源适配器 <span class="en">Data-Source Adapters</span></h2>
+
+<table>
+  <thead>
+    <tr><th>适配器 <span class="en">Adapter</span></th><th>文件 <span class="en">File</span></th><th>数据来源 <span class="en">Source</span></th><th>状态 <span class="en">Status</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Baostock</td><td><code>data/adapters/baostock_adapter.py</code></td><td>A 股免费数据</td><td>可用（批量重试 + 涨跌停 mask + hs300 成分）</td></tr>
+    <tr><td>YFinance</td><td><code>data/adapters/yfinance_adapter.py</code></td><td>美股/全球</td><td>可用</td></tr>
+    <tr><td>Synthetic</td><td><code>data/loaders.py</code></td><td>几何布朗运动生成</td><td>可用</td></tr>
+  </tbody>
+</table>
+
+<h2>4.5 合成数据生成 <span class="en">Synthetic Data Generation</span></h2>
+
+<p>基于几何布朗运动（Geometric Brownian Motion）生成价格序列：</p>
+<p class="en">Price series are generated from geometric Brownian motion:</p>
+
+<div class="math">S_t = S_{t-1} · exp(μΔt + σ√Δt · ε_t),  ε_t ~ N(0,1)</div>
+
+<h2>4.6 A 股口径升级 <span class="en">A-share Convention Upgrade (v0.3.0)</span></h2>
+
+<h3>4.6.1 涨跌停 mask <span class="en">Price-Limit Mask</span></h3>
+
+<p>A 股有涨跌停制度（主板 ±10%，创业板 300/301 与科创板 688 ±20%）。涨停买不进、跌停卖不出，若不处理会把无法成交的"假信号"计入回测收益。<code>baostock_adapter.py</code> 的 <code>_limit_move_mask</code> 在加载数据时把触及涨跌停的交易日 mask 置 <code>False</code>：</p>
+<p class="en">A-shares impose daily price limits (main board ±10%; ChiNext 300/301 and STAR 688 ±20%). A limit-up cannot be bought and a limit-down cannot be sold; without handling this, unfillable "phantom signals" leak into backtest P&amp;L. <code>_limit_move_mask</code> in <code>baostock_adapter.py</code> sets the mask to <code>False</code> on any day that hits a limit:</p>
+
+<ul>
+  <li>阈值：<code>_is_gem_or_star(ticker)</code> 判断板块，主板 0.095、创业板/科创板 0.195（留 0.5% 余量防前复权误差）。
+    <span class="en">Threshold: board detection via <code>_is_gem_or_star</code>; main board 0.095, ChiNext/STAR 0.195 (0.5% slack against forward-adjustment error).</span></li>
+  <li>判定：当日 close 相对前一交易日 close 的 |涨跌幅| ≥ 阈值 → 该日不可成交。
+    <span class="en">Rule: |pct change| of close vs prior close ≥ threshold → untradable that day.</span></li>
+  <li>边界：首个交易日无前收盘不判（True）；缺失收盘（NaN）的日子保持 True，由 NaN mask 另行置 False，不重复处理。
+    <span class="en">Edge: first day has no prior close (left True); NaN-close days stay True and are handled separately by the NaN mask.</span></li>
+</ul>
+
+<p>开关由 <code>config["handle_limit_up_down"]</code>（默认 <code>True</code>）控制。</p>
+<p class="en">Controlled by <code>config["handle_limit_up_down"]</code> (default <code>True</code>).</p>
+
+<h3>4.6.2 hs300 真实成分股池 <span class="en">hs300 Real Constituent Universe</span></h3>
+
+<p>早期实验用内置 50 只静态样本，既有人工上限（截面太小、权重股同质），也有幸存者偏差。v0.3.0 各运行脚本新增 <code>--universe hs300</code>（默认），按 <code>start</code> 日拉取真实沪深 300 成分股，解除 50 只上限并缓解幸存者偏差：</p>
+<p class="en">Early experiments used a built-in 50-name static sample — an artificial cap (too small a cross-section, homogeneous heavy-weights) plus survivorship bias. v0.3.0 adds <code>--universe hs300</code> (default) to every runner, pulling the real CSI 300 constituents as of the <code>start</code> date, lifting the 50-name cap and mitigating survivorship bias:</p>
+
+<pre>python scripts/run_full_pipeline_oos.py --stocks 100 --universe hs300</pre>
+
+<p><code>--universe sample</code> 退回内置静态清单。100 股 hs300 口径下的重测结果见第 13 章（Ridge IC 0.048/Sharpe +0.53 达 GO 线，30 股无信号被证伪为股票池效应）。</p>
+<p class="en"><code>--universe sample</code> falls back to the built-in static list. The 100-name hs300 re-test results are in §13 (Ridge IC 0.048 / Sharpe +0.53 hits the GO line; the 30-name "no signal" is disproved as a universe-size effect).</p>
+
+<!-- ==================== 5. 特征工程 ==================== -->
+<h1 class="chapter"><span class="num">5</span>特征工程 <span class="en">Feature Engineering</span></h1>
+
+<h2>5.1 特征管线总览 <span class="en">Feature Pipeline Overview</span></h2>
+
+<p>原始 OHLCV →（通道契约）→ 基础特征 → 4 条特征管线：</p>
+<p class="en">Raw OHLCV → (channel contract) → base features → four feature pipelines:</p>
+
+<pre>Panel(T×N×F)
+    │  ensure_base_panel (通道契约 / channel contract)
+    ▼
+基础特征 [close, log_return, volume, volume_ratio, volatility_20]
+    │
+    ├─→ TensorFactorEngine    (7 GPU 原语 → 因子矩阵)
+    ├─→ LegacyFactorRegistry   (35 个经典 alpha 因子)
+    ├─→ FreqFeatureExtractor   (FFT 频域 → 低/中/高频段)
+    └─→ RegimeFeatureExtractor (6 组市场状态 → 200 维)
+         ▼
+    s_t ∈ R^200  市场状态向量 / market-state vector</pre>
+
+<div class="note">手工因子注册表为 <strong>35 个</strong>（非早期文档的 213）；且 legacy 因子与 FFT 特征<strong>当前未接入</strong>任何训练/评估管线。200 维 s_t 全部由 <code>RegimeFeatureExtractor</code> 从基础特征派生。
+<span class="en">The hand-crafted registry holds 35 factors (not 213 as in earlier docs); legacy and FFT features are currently not wired into any training/eval pipeline. The 200-dim s_t is derived entirely by RegimeFeatureExtractor from base features.</span></div>
+
+<h2>5.2 TensorFactorEngine — GPU 加速原语 <span class="en">GPU-Accelerated Primitives</span></h2>
+
+<p>7 个 mask-aware 原语，全部在 GPU 上矢量化计算：</p>
+<p class="en">Seven mask-aware primitives, all vectorized on the GPU:</p>
+
+<table>
+  <thead>
+    <tr><th>原语 <span class="en">Primitive</span></th><th>功能 <span class="en">Function</span></th><th>公式 <span class="en">Formula</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>rank</code></td><td>截面排名归一化</td><td>rank(x_i) / N → [0, 1]</td></tr>
+    <tr><td><code>corr</code></td><td>滚动 Pearson 相关</td><td>cov(x, y) / (σ_x · σ_y)</td></tr>
+    <tr><td><code>ewma</code></td><td>指数加权移动平均</td><td>α·x_t + (1-α)·EMA_{t-1}</td></tr>
+    <tr><td><code>ts_delta</code></td><td>时间序列差分</td><td>x_t - x_{t-lag}</td></tr>
+    <tr><td><code>ts_sum</code></td><td>滚动求和</td><td>Σ_{i=t-lag}^{t} x_i</td></tr>
+    <tr><td><code>ts_std</code></td><td>滚动标准差</td><td>σ(x_{t-lag:t})</td></tr>
+    <tr><td><code>ts_mean</code></td><td>滚动均值</td><td>mean(x_{t-lag:t})</td></tr>
+  </tbody>
+</table>
+
+<h2>5.3 FreqFeatureExtractor — 频域特征 <span class="en">Frequency-Domain Features (unwired)</span></h2>
+
+<p>FFT 变换后按频率分段聚合，捕捉周期性模式：</p>
+<p class="en">FFT followed by per-band aggregation to capture periodic patterns:</p>
+
+<pre>FFT(signal) → 功率谱 power spectrum
+    ├── 低频段 (长期趋势)   → mean/power
+    ├── 中频段 (中级周期)   → mean/power
+    └── 高频段 (短期波动)   → mean/power + noise ratio</pre>
+
+<div class="note">当前为独立模块，<strong>未接入</strong>训练/评估管线。
+<span class="en">Currently a standalone module, not wired into training/eval.</span></div>
+
+<h2>5.4 RegimeFeatureExtractor — 市场状态向量 <span class="en">Market-State Vector</span></h2>
+
+<p>从基础特征提取 6 组市场状态，每组内部压缩后拼接为 200 维 s_t：</p>
+<p class="en">Extracts six market-state groups from base features, compresses each, and concatenates into the 200-dim s_t:</p>
+
+<table>
+  <thead>
+    <tr><th>组别 <span class="en">Group</span></th><th>内容 <span class="en">Content</span></th><th class="num">维度 <span class="en">Dim</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>自适应窗口价格趋势</td><td>多时间尺度价格变化率</td><td class="num">~33</td></tr>
+    <tr><td>波动率结构</td><td>历史波动率、GARCH 信号</td><td class="num">~33</td></tr>
+    <tr><td>流动性/成交量</td><td>成交量变化、换手率代理</td><td class="num">~33</td></tr>
+    <tr><td>技术指标</td><td>MA 交叉、RSI、布林带</td><td class="num">~33</td></tr>
+    <tr><td>截面统计</td><td>横截面均值、离散度、排名相关性</td><td class="num">~33</td></tr>
+    <tr><td>FFT 频域</td><td>频段功率比、主频检测</td><td class="num">~35</td></tr>
+  </tbody>
+</table>
+
+<p><strong>总计：200 维。这是 s_t 的唯一来源</strong>（legacy 与 FFT 特征不参与）。</p>
+<p class="en"><em>Total: 200 dims — the sole source of s_t</em> (legacy and FFT features do not participate).</p>
+
+<h2>5.5 经典因子注册表 <span class="en">Classical Factor Registry (unwired)</span></h2>
+
+<p>35 个 hand-crafted alpha 因子，参考 ml-quant-trading，分为价量因子（趋势、反转、突破）、波动率因子、流动性因子、时间序列算子组合（rank, ts_mean, ts_std, corr 等组合）。所有因子通过 <code>LegacyFactorRegistry</code> 统一管理，当前为独立模块，<strong>未接入</strong>训练/评估管线。</p>
+<p class="en">35 hand-crafted alpha factors (reference: ml-quant-trading) spanning price-volume, volatility, liquidity, and time-series operator combinations. Managed via <code>LegacyFactorRegistry</code>; a standalone module, not wired into training/eval.</p>
+
+<!-- ==================== 6. 核心模型 ==================== -->
+<h1 class="chapter"><span class="num">6</span>核心模型 <span class="en">Core Models</span></h1>
+
+<h2>6.1 RegimeRouter <span class="en">Regime Router</span></h2>
+
+<div class="note">Inspiration: Kimi K3 Stable LatentMoE — 896 experts, 16 active, latent-space routing + Quantile Balancing.</div>
+
+<h3>6.1.1 功能 <span class="en">Role</span></h3>
+
+<p>将 200 维市场状态向量 s_t 映射到 16 维 regime 潜空间 z_t，在潜空间中决定激活哪些专家。</p>
+<p class="en">Maps the 200-dim market-state vector s_t to a 16-dim regime latent space z_t, where it decides which experts to activate.</p>
+
+<h3>6.1.2 数学公式 <span class="en">Formulation</span></h3>
+
+<p><strong>潜空间投影</strong>（低秩瓶颈，过滤噪声）：</p>
+<p class="en"><em>Latent projection</em> (low-rank bottleneck, filters noise):</p>
+
+<div class="math">z_t = LayerNorm( W_down · SiLU(W_up · s_t) )  ∈  R^16</div>
+
+<p>其中 W_up 将 200 维升到 64 维，W_down 将 64 维降到 16 维。</p>
+<p class="en">W_up lifts 200 → 64 dims; W_down reduces 64 → 16 dims.</p>
+
+<p><strong>温度缩放路由</strong>：</p>
+<p class="en"><em>Temperature-scaled routing</em>:</p>
+
+<div class="math">p(expert_i | z_t) = exp((W_i^route · z_t + b_i)/τ) / Σ_{j=1..10} exp((W_j^route · z_t + b_j)/τ)</div>
+<div class="math">activated = TopK(p, k=3)</div>
+
+<p><strong>Quantile Balancing</strong>（零辅助损失负载均衡）：</p>
+<p class="en"><em>Quantile Balancing</em> (load balancing with zero auxiliary loss):</p>
+
+<div class="math">b_i ← b_i + η · (1/10 − count_i / Σ_j count_j)</div>
+
+<p>如果某个专家被选得太少，自动加 bias；被选得太多，自动减 bias。</p>
+<p class="en">An under-selected expert gains bias; an over-selected expert loses bias.</p>
+
+<p><strong>Noisy Gating</strong>（仅训练模式）：</p>
+<p class="en"><em>Noisy Gating</em> (train mode only):</p>
+
+<div class="math">p_noisy = softmax( (W_route · z_t + b + ε · softplus(W_noise · z_t)) / τ )</div>
+
+<h3>6.1.3 参数表 <span class="en">Parameters</span></h3>
+
+<table>
+  <thead>
+    <tr><th>参数 <span class="en">Parameter</span></th><th>默认 <span class="en">Default</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>input_dim</code></td><td class="num">200</td><td>市场状态向量维度</td></tr>
+    <tr><td><code>latent_dim</code></td><td class="num">16</td><td>Regime 潜空间维度</td></tr>
+    <tr><td><code>n_experts</code></td><td class="num"><strong>10</strong></td><td>策略专家总数</td></tr>
+    <tr><td><code>top_k</code></td><td class="num">3</td><td>每次激活的专家数（稀疏目前为声明，见附录 C）</td></tr>
+    <tr><td><code>τ_train / τ_val / τ_inference</code></td><td class="num">1.0 / 1.0 / 0.1</td><td>训练（软）/ 验证（确定）/ 推理（近离散）</td></tr>
+    <tr><td><code>noisy_gating</code></td><td class="num">True</td><td>训练时是否使用噪声门控</td></tr>
+  </tbody>
+</table>
+
+<h3>6.1.4 三种运行模式 <span class="en">Three Running Modes</span></h3>
+
+<pre>router(s_t, mode="train")      # τ=1.0 + noisy gating
+router(s_t, mode="val")        # τ=1.0, 无噪声, 确定性 / no noise, deterministic
+router(s_t, mode="inference")  # τ=0.1, 近离散 / near-discrete</pre>
+
+<h2>6.2 KDA Market Memory <span class="en">KDA Market Memory</span></h2>
+
+<div class="note">Inspiration: Kimi Delta Attention (KDA) — per-channel forget gate + delta-rule state update.</div>
+
+<h3>6.2.1 功能 <span class="en">Role</span></h3>
+
+<p>维护一个固定大小的记忆矩阵 M_t ∈ R^{128×64}，每个时间步通过 delta-rule 在线学习机制更新，不需要存储整个历史序列。</p>
+<p class="en">Maintains a fixed-size memory matrix M_t ∈ R^{128×64}, updated each step via a delta-rule online learning mechanism, without storing the full history.</p>
+
+<h3>6.2.2 数学公式 <span class="en">Formulation</span></h3>
+
+<p><strong>Per-Channel Forget Gate</strong>（低秩瓶颈）：</p>
+<p class="en"><em>Per-channel forget gate</em> (low-rank bottleneck):</p>
+
+<div class="math">α_t = σ( exp(A_log) · ( SiTU(W_up · SiTU(W_down · s_t)) + dt_bias ) )  ∈  (0.001, 1)^128</div>
+
+<p><strong>Route-Modulated Forgetting</strong>（CDAP 连接：Router → Memory）：</p>
+<p class="en"><em>Route-modulated forgetting</em> (CDAP link: Router → Memory):</p>
+
+<div class="math">α'_t = α_t ⊙ σ(W_route · z_t)   （路由信号调制遗忘 / routing modulates forgetting）</div>
+<div class="math">α''_t = α'_t ⊙ cdap_gate        （CDAP 联合空间反馈 / joint-space feedback）</div>
+
+<p><strong>Delta-Rule 状态更新</strong>：</p>
+<p class="en"><em>Delta-rule state update</em>:</p>
+
+<div class="math">k_t = L2Norm(W_k · s_t)      # L2 归一化关键向量（防数值爆炸）</div>
+<div class="math">v_t = W_v · s_t              # 值向量 / value vector</div>
+<div class="math">β_t = σ(W_β · s_t)           # 可学习更新步长 ∈ (0, 1)</div>
+<div class="math">M_t = M_{t-1} − β_t · k_t ⊗ (M_{t-1} · k_t) + β_t · k_t ⊗ v_t</div>
+
+<p><strong>记忆检索</strong>：</p>
+<p class="en"><em>Memory retrieval</em>:</p>
+
+<div class="math">o_t = M_t^T · q_t,   q_t = W_q · s_t</div>
+<div class="math">output = RMSNorm( σ(W_out_up · SiTU(W_out_down · s_t)) ⊙ o_t )</div>
+
+<h3>6.2.3 复杂度分析 <span class="en">Complexity</span></h3>
+
+<pre>每步计算 per step：O(d_k · d_v) = O(128 × 64) = O(8192)
+状态大小 state：128 × 64 × 4 bytes = 32 KB
+序列长度无关 sequence-length independent — 无 KV-cache，无历史窗口限制</pre>
+
+<h3>6.2.4 参数表 <span class="en">Parameters</span></h3>
+
+<table>
+  <thead>
+    <tr><th>参数 <span class="en">Parameter</span></th><th>默认 <span class="en">Default</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>d_k</code></td><td class="num">128</td><td>Key 维度 / memory slot 数量</td></tr>
+    <tr><td><code>d_v</code></td><td class="num">64</td><td>Value 维度 / 每 slot 存储信息</td></tr>
+    <tr><td><code>d_feature</code></td><td class="num">200</td><td>输入 s_t 维度</td></tr>
+    <tr><td><code>bottleneck_ratio</code></td><td class="num">4</td><td>Forget gate 低秩压缩比</td></tr>
+    <tr><td><code>use_route_modulation</code></td><td class="num">True</td><td>是否启用 Router → Memory CDAP</td></tr>
+    <tr><td><code>safe_gate_lower_bound</code></td><td class="num">0.001</td><td>K3 安全门下限，防止完全遗忘</td></tr>
+  </tbody>
+</table>
+
+<h2>6.3 Cross-Dimension Attention Protocol (CDAP) <span class="en">跨维度注意力协议 ★ 核心方法论创新</span></h2>
+
+<h3>6.3.1 设计动机 <span class="en">Motivation</span></h3>
+
+<p>三个信息流——Router 输出 p_t、Memory 状态 M_t、Depth 特征 {h_0, h_1, h_2}——在传统架构中是<strong>单向独立</strong>的。CDAP 将它们投影到一个共享联合空间，实现<strong>双向调制</strong>。</p>
+<p class="en">Three information streams — Router output p_t, Memory state M_t, Depth features {h_0, h_1, h_2} — are <em>one-way and independent</em> in conventional architectures. CDAP projects them into a shared joint space for <em>bidirectional modulation</em>.</p>
+
+<h3>6.3.2 数学公式 <span class="en">Formulation</span></h3>
+
+<p><strong>Step 1 — 三维投影到联合空间</strong>：</p>
+<p class="en"><em>Step 1 — project the three dimensions into the joint space</em>:</p>
+
+<div class="math">e = f_expert→joint(p_t)          ∈ R^64</div>
+<div class="math">m = f_memory→joint(flatten(M_t)) ∈ R^64</div>
+<div class="math">d = f_depth→joint(concat(h))     ∈ R^64</div>
+
+<p><strong>Step 2 — 逐元素乘法融合</strong> ★ 关键设计决策：</p>
+<p class="en"><em>Step 2 — element-wise multiplicative fusion</em> (key design decision):</p>
+
+<div class="math">j = e ⊙ m ⊙ d   ∈ R^64</div>
+
+<p><strong>为什么是乘法不是加法？</strong></p>
+<p class="en"><em>Why multiplication, not addition?</em></p>
+<ul>
+  <li>加法假设三个维度独立贡献 → memory 不确定时仍会加噪声到路由信号。
+    <span class="en">Addition assumes independent contributions — an uncertain memory would still inject noise into the routing signal.</span></li>
+  <li>逐元素乘法 → 任何维度接近零，整条调制通路被静音。
+    <span class="en">Element-wise multiplication silences the whole modulation path whenever any dimension approaches zero.</span></li>
+  <li>强归纳偏置，适合稀疏的、行情依赖的计算。
+    <span class="en">A strong inductive bias suited to sparse, regime-dependent computation.</span></li>
+</ul>
+
+<p><strong>Step 3 — 反向投影（Joint → 各组件）</strong>：</p>
+<p class="en"><em>Step 3 — back-projection (joint → each component)</em>:</p>
+
+<table>
+  <thead>
+    <tr><th>方向 <span class="en">Direction</span></th><th>公式 <span class="en">Formula</span></th><th>效果 <span class="en">Effect</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>→ Router</td><td><code>p'_t = softmax(log p_t + δ · W_router_out · j)</code></td><td>记忆+深度修正路由偏好（<strong>logit 空间</strong>）</td></tr>
+    <tr><td>→ Memory</td><td><code>g_t = σ(W_memory_out · j) ∈ (0,1)^128</code></td><td>额外遗忘门调制</td></tr>
+    <tr><td>→ Depth</td><td><code>w_t = softmax(W_depth_out · j) ∈ Δ²</code></td><td>跨层特征检索权重</td></tr>
+  </tbody>
+</table>
+
+<div class="note">路由调制在 <strong>logit 空间</strong>进行（<code>softmax(log p + δ·bias)</code>），保证零调制（δ=0 或 j=0）时严格无扰动——旧实现直接在概率空间加偏置，初始化即扭曲路由。
+<span class="en">Routing modulation happens in logit space (<code>softmax(log p + δ·bias)</code>), so zero modulation (δ=0 or j=0) is strictly non-perturbing — the old implementation added bias in probability space, distorting routing at initialization.</span></div>
+
+<p><strong>Step 4 — 融合输出</strong>：</p>
+<p class="en"><em>Step 4 — fused output</em>:</p>
+
+<div class="math">h_fused = Σ_{k=0}^{2} w_t^(k) · h_k</div>
+
+<p><strong>CDAP Scales</strong>（可学习的三维调制强度）：</p>
+<p class="en"><em>CDAP scales</em> (learnable per-dimension modulation strengths):</p>
+
+<pre>expert_bias_scale   — 记忆+深度对路由的调制强度 / memory+depth → routing
+memory_gate_scale   — 路由+深度对记忆的调制强度 / routing+depth → memory
+depth_weight_scale  — 路由+记忆对深度的调制强度 / routing+memory → depth</pre>
+
+<p>三个 scale 初始化为 0（zero-init），训练中逐步放开。</p>
+<p class="en">The three scales are zero-initialized and gradually released during training.</p>
+
+<h3>6.3.3 代码接口 <span class="en">Interface</span></h3>
+
+<pre>outputs = cross_dim_attn(
+    routing_probs=p_t,          # (B, 10) router 输出
+    memory_state=M_t,           # (B, 128, 64) memory 矩阵
+    layer_outputs=[h0, h1, h2], # 3 层特征, each (B, 64)
+    mode="train"
+)
+# returns: routing_mod, memory_gate, depth_weights, h_fused</pre>
+
+<h2>6.4 Adaptive Hardening Mechanism (AHM) <span class="en">自适应硬化机制 ★ 研究性，默认禁用</span></h2>
+
+<h3>6.4.1 设计动机 <span class="en">Motivation</span></h3>
+
+<p>Kimi K3 使用静态的 3:1 比例。DAFT 的 AHM 从数据中学习快/慢路径比例，而非硬编码：</p>
+<p class="en">Kimi K3 uses a static 3:1 ratio. DAFT's AHM learns the fast/slow path ratio from data instead of hard-coding it:</p>
+
+<pre>低波动趋势市 → 大部分时间很常规 → 应该 ~90% 走快路径
+高波动事件市 → 大部分时间很反常 → 应该 ~10% 走快路径</pre>
+
+<h3>6.4.2 四大机制 <span class="en">Four Mechanisms</span></h3>
+
+<ol>
+  <li><strong>Pattern Counter（模式计数）</strong> — <code>pattern = discretize_pattern(routing_probs)</code>（Top-3 专家索引排序），<code>pattern_counter[(regime_id, pattern)] += 1</code>。
+    <span class="en">Counts (regime, top-3 pattern) co-occurrences.</span></li>
+  <li><strong>Cache Builder（缓存构建）</strong> — 硬化条件 <code>count(key) ≥ θ_harden AND confidence &gt; ρ_min</code> → 缓存该 (regime, pattern) 的三维调制向量。
+    <span class="en">Caches the modulation vector once a pattern is seen enough and confidently.</span></li>
+  <li><strong>Entropy Guard（熵守卫）</strong> — <code>if H(p_recent) &gt; λ_entropy × H_baseline: degrade_to_full_exploration()</code>。
+    <span class="en">Falls back to full exploration when recent routing entropy spikes.</span></li>
+  <li><strong>Staleness Eviction（过期驱逐）</strong> — 长时间未命中 + 命中次数 &lt; 阈值的缓存项 → 清除。
+    <span class="en">Evicts stale, rarely-hit cache entries.</span></li>
+</ol>
+
+<h3>6.4.3 当前状态 <span class="en">Current Status</span></h3>
+
+<div class="note">AHM 为<strong>研究性实现，默认禁用</strong>。<code>ExpertEnsemble</code> 的 <code>use_hardening</code> 参数默认 <code>False</code>。硬化快路径的完整接线（<code>detect_regime_shift</code>、<code>evict</code> 在生产管线中的调用）尚未完成，见附录 C 待办。
+<span class="en">AHM is a research-grade implementation, disabled by default; <code>use_hardening</code> defaults to <code>False</code>. Full wiring of the hardened fast path into the production pipeline is unfinished (§Appendix C).</span></div>
+
+<!-- ==================== 7. 专家池 ==================== -->
+<h1 class="chapter"><span class="num">7</span>专家池 <span class="en">Expert Pool</span></h1>
+
+<h2>7.1 BaseExpert 接口 <span class="en">BaseExpert Interface</span></h2>
+
+<pre>class BaseExpert(nn.Module):
+    def __init__(self, input_dim=200, hidden_dim=64, n_layers=2, name="base"):
+        # MLP backbone: Linear → LayerNorm → SiLU → Dropout (× n_layers)
+        # Prediction head: hidden_dim → 1
+        # Output activation: SiTU (σ(x) ⊙ tanh(x))
+
+    def forward(s_t, return_hidden=False) → signal ∈ [-1, 1]
+
+    @abstractmethod
+    def _regime_filter(panel) → mask: Tensor[bool]   # 哪些时刻该专家激活
+    @abstractmethod
+    def compute_loss(pred, target, mask) → loss      # 专家特定损失</pre>
+
+<h2>7.2 五类专家（10 实例） <span class="en">Five Expert Types (10 Instances)</span></h2>
+
+<table>
+  <thead>
+    <tr><th>类型 <span class="en">Type</span></th><th class="num">实例 <span class="en">Inst.</span></th><th class="num">hidden_dim</th><th>Regime Filter</th><th>损失函数 <span class="en">Loss</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>TrendExpert</strong></td><td class="num">2</td><td class="num">64</td><td>ADX &gt; 25（趋势市）</td><td>Direction-weighted MSE（方向错 ×11）</td></tr>
+    <tr><td><strong>ReversalExpert</strong></td><td class="num">2</td><td class="num">64</td><td>ADX &lt; 20（震荡市）</td><td>Negative Rank IC</td></tr>
+    <tr><td><strong>VolatilityExpert</strong></td><td class="num">2</td><td class="num">48</td><td>Vol &gt; P80（高波动）</td><td>MSE + 0.01·Var(pred)</td></tr>
+    <tr><td><strong>EventExpert</strong></td><td class="num">2</td><td class="num">48</td><td>全部数据（兜底）</td><td>BCE on return direction</td></tr>
+    <tr><td><strong>MomentumExpert</strong></td><td class="num">2</td><td class="num">64</td><td>20日截面动量显著非零</td><td>Direction-weighted MSE（方向错 ×8）</td></tr>
+  </tbody>
+</table>
+
+<p><strong>MomentumExpert</strong> 专注<strong>截面动量</strong> regime，与纯趋势跟踪区分——趋势专家捕捉方向性 ADX 过滤运动，动量专家捕捉"赢家恒赢"的截面持续性（20 日形成期横截面动量显著非零，且 top/bottom decile 价差拉大）。研究依据：Chichernea et al. (JFE 2021) 论证动量与反转是<strong>独立的、regime 依赖</strong>现象；DHMoE (AAAI 2025) 支持细粒度专家专业化。方向错惩罚 ×8，介于趋势（×11）与事件（×4）之间。</p>
+<p class="en"><em>MomentumExpert</em> specializes in the <em>cross-sectional momentum</em> regime, distinct from pure trend-following — the trend expert captures directional ADX-filtered moves, while the momentum expert captures "winners keep winning" cross-sectional persistence (significant 20-day formation momentum and a wide top/bottom decile spread). Grounding: Chichernea et al. (JFE 2021) shows momentum and reversal are independent, regime-dependent phenomena; DHMoE (AAAI 2025) supports fine-grained expert specialization. Its wrong-direction penalty ×8 sits between trend (×11) and event (×4).</p>
+
+<h2>7.3 SiTU 激活函数 <span class="en">SiTU Activation</span></h2>
+
+<div class="math">SiTU(x) = σ(x) ⊙ tanh(x),  输出 ∈ [-1, 1]</div>
+
+<p>来自 Kimi K3。自然有界，防止专家间输出量级漂移导致 MoE 门控梯度失真。</p>
+<p class="en">From Kimi K3. Naturally bounded, preventing output-magnitude drift across experts from distorting MoE gating gradients.</p>
+
+<h2>7.4 专家内部结构 <span class="en">Expert Internal Structure</span></h2>
+
+<pre>s_t (200) → Linear(200→64) → LayerNorm → SiLU → Dropout(0.1)
+          → Linear(64→64) → LayerNorm → SiLU → Dropout(0.1)
+          → Linear(64→1) → SiTU → signal ∈ [-1, 1]</pre>
+
+<p>10 专家核心约 31.5 万参数。</p>
+<p class="en">The 10 experts total ~315K core parameters.</p>
+
+<!-- ==================== 8. 集成层与模型工厂 ==================== -->
+<h1 class="chapter"><span class="num">8</span>集成层与模型工厂 <span class="en">Ensemble Layer &amp; Model Factory</span></h1>
+
+<h2>8.1 ExpertEnsemble <span class="en">Expert Ensemble</span></h2>
+
+<pre>class ExpertEnsemble(nn.Module):
+    def __init__(self, experts, router, memory, cross_dim_attn, hardening)
+
+    def forward(s_t, layer_outputs, mode="train", use_hardening=False) → dict:
+        # mode: "train" | "val" | "inference"
+        # 返回: signal, routing_probs, regime_id, depth_weights, metadata</pre>
+
+<h2>8.2 Forward 的三种模式 <span class="en">Three Forward Modes</span></h2>
+
+<table>
+  <thead>
+    <tr><th>模式 <span class="en">Mode</span></th><th>Router 行为 <span class="en">Router</span></th><th>CDAP</th><th>硬化 <span class="en">Hardening</span></th><th>梯度 <span class="en">Grad</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>train</code></td><td>τ=1.0, noisy gating ON</td><td>完整计算</td><td>不使用</td><td>跟踪</td></tr>
+    <tr><td><code>val</code></td><td>τ=1.0, noisy gating OFF</td><td>完整计算</td><td>不使用</td><td>不跟踪</td></tr>
+    <tr><td><code>inference</code></td><td>τ=0.1, noisy gating OFF</td><td>先查缓存</td><td>按需使用</td><td>不跟踪</td></tr>
+  </tbody>
+</table>
+
+<h2>8.3 模型工厂 factory.py <span class="en">Model Factory</span></h2>
+
+<p>历史上 <code>build_experts</code> / <code>build_ensemble</code> / <code>build_layer_proj</code> 在 7 个脚本里各复制一份，<strong>n_experts 8 vs 10 的 forward 崩溃正是这样漂出来的</strong>。v0.3.0 新增 <code>src/daft/models/factory.py</code> 提供单一权威入口（去重 −189 行）：</p>
+<p class="en">Historically <code>build_experts</code>/<code>build_ensemble</code>/<code>build_layer_proj</code> were each copied into seven scripts — the n_experts 8-vs-10 forward crash drifted out of exactly that. v0.3.0 adds <code>src/daft/models/factory.py</code> as the single authoritative entry point (−189 lines of duplication):</p>
+
+<pre>from daft.models.factory import build_model, build_experts, build_ensemble
+
+experts = build_experts()       # 10 专家池：5 类 × 2 实例
+model, layer_proj = build_model(cdap_strength=0.1)  # 一键组装 + 一致性守卫</pre>
+
+<p>标准架构常量（与 <code>tests/conftest.py</code> 一致）：</p>
+<p class="en">Standard architecture constants (consistent with <code>tests/conftest.py</code>):</p>
+
+<pre>INPUT_DIM=200, LATENT_DIM=16, D_K=128, D_V=64, N_LAYERS=3,
+JOINT_DIM=64, N_EXPERTS=10, TOP_K=3</pre>
+
+<p><code>build_ensemble</code> 内置 n_experts 一致性 assert，专家数 / router / CDAP 不一致时立即报错。</p>
+<p class="en"><code>build_ensemble</code> carries an n_experts consistency assert — a mismatch among experts / router / CDAP raises immediately.</p>
+
+<!-- ==================== 9. 训练管线 ==================== -->
+<h1 class="chapter"><span class="num">9</span>训练管线 <span class="en">Training Pipeline</span></h1>
+
+<h2>9.1 四阶段总览 <span class="en">Four-Stage Overview</span></h2>
+
+<pre>Stage 1: 独立专家训练 ──→ Stage 2: Router + Memory ──→ Stage 3: CDAP 联合微调 ──→ Stage 4: 硬化收集
+(experts only)             (experts frozen)              (all unfrozen, low LR)        (no gradient)</pre>
+
+<h2>9.2 Stage 1 — 独立专家训练 <span class="en">Independent Expert Training</span></h2>
+
+<p>每个专家在自己的行情子集上学到有效的预测策略。</p>
+<p class="en">Each expert learns an effective prediction policy on its own regime subset.</p>
+
+<pre>训练参数: 专家 MLP 权重 + head
+冻结参数: Router, Memory, CDAP, AHM
+流程: regime_filter 选样本 → 专家特定 loss → 15 epochs → 保存 checkpoint</pre>
+
+<h2>9.3 Stage 2 — Router + Memory 训练 <span class="en">Router + Memory Training</span></h2>
+
+<pre>训练参数: Router + Memory + CDAP scale（温和）
+冻结参数: 所有专家
+损失: L = L_MSE + λ_entropy · H(routing)
+LR: 1e-4, 20 epochs</pre>
+
+<h2>9.4 Stage 3 — CDAP 联合微调 <span class="en">Joint Fine-Tuning</span></h2>
+
+<pre>训练参数: 全部
+LR: 1e-5（极低，防灾难性遗忘）
+前 3 epochs 只训 CDAP scale（突破 zero-init），后 7 epochs 全参数</pre>
+
+<h2>9.5 Stage 4 — 硬化收集 <span class="en">Hardening Collection</span></h2>
+
+<pre>梯度关闭, 200+ 步前向, τ=0.1
+输出: 缓存表 + 基线路由熵 + 硬化统计</pre>
+
+<!-- ==================== 10. 组合优化 ==================== -->
+<h1 class="chapter"><span class="num">10</span>组合优化 <span class="en">Portfolio Optimization</span></h1>
+
+<h2>10.1 Markowitz 均值-方差优化 <span class="en">Markowitz Mean-Variance Optimization</span></h2>
+
+<div class="math">max_w   w^T · μ − γ · w^T · Σ_shrunk · w</div>
+
+<pre>s.t.     w_i ≥ 0        (long-only)
+         Σ w_i = 1       (全额投资 / fully invested)
+         w_i ≤ w_max     (单仓位上限 / single-position cap, 默认 5%)</pre>
+
+<ul>
+  <li><strong>μ</strong> = DAFT 输出的预期收益信号（截面方向，非量级）
+    <span class="en">expected-return signal from DAFT (cross-sectional direction, not magnitude)</span></li>
+  <li><strong>Σ_shrunk</strong> = Ledoit-Wolf 收缩协方差矩阵
+    <span class="en">Ledoit-Wolf shrunk covariance matrix</span></li>
+  <li><strong>γ</strong> = 风险厌恶系数 <span class="en">risk-aversion coefficient</span></li>
+</ul>
+
+<h2>10.2 参数表 <span class="en">Parameters</span></h2>
+
+<table>
+  <thead>
+    <tr><th>参数 <span class="en">Parameter</span></th><th>默认 <span class="en">Default</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>risk_aversion</code></td><td class="num">1.0</td><td>γ：风险厌恶系数</td></tr>
+    <tr><td><code>max_weight</code></td><td class="num">0.05</td><td>单票最大权重</td></tr>
+  </tbody>
+</table>
+
+<!-- ==================== 11. 回测引擎 ==================== -->
+<h1 class="chapter"><span class="num">11</span>回测引擎 <span class="en">Backtest Engine</span></h1>
+
+<h2>11.1 矢量化回测 <span class="en">Vectorized Backtest</span></h2>
+
+<pre>from daft.backtest import BacktestEngine
+
+engine = BacktestEngine(config={
+    "transaction_cost_bps": 2.0,
+    "slippage_bps": 1.0,
+    "top_quantile": 0.2,
+    "long_only": True,
+    "annualization": 252,
+    "rebalance_freq": 1,            # 调仓频率（v0.3.0）
+    "weight_mode": "equal",         # equal | signal_zscore（分数仓位）
+    "signal_smoothing": 0.0,        # EMA 平滑系数 λ（0=不启用）
+    "respect_mask_no_trade": True,  # 成交约束（停牌/涨跌停日禁开平仓）
+})
+results = engine.run(signals, returns, panel, mask=panel.mask)</pre>
+
+<h2>11.2 信号 → 持仓转换 <span class="en">Signal → Position Conversion</span></h2>
+
+<pre>信号 s ∈ R^N → 截面排名 → top_quantile(=20%) 的股票做多
+long_only=False 时: bottom_quantile 等权做空</pre>
+
+<p><strong>仓位模式（v0.3.0 新增）</strong>：<code>weight_mode</code> 决定候选股内部的权重分配：</p>
+<p class="en"><em>Position mode (v0.3.0)</em>: <code>weight_mode</code> decides how weights are distributed within the candidate set:</p>
+
+<table>
+  <thead>
+    <tr><th>模式 <span class="en">Mode</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>equal</code></td><td>top-k 候选等权（原行为）· equal-weight across top-k (original behavior)</td></tr>
+    <tr><td><code>signal_zscore</code></td><td>按信号 z 分数加权（候选内），信号越强仓位越重 · weight by signal z-score within candidates</td></tr>
+  </tbody>
+</table>
+
+<h2>11.3 交易制度约束 <span class="en">Trading-Regime Constraints (v0.3.0)</span></h2>
+
+<p>A 股的两条硬约束在回测层落实：</p>
+<p class="en">Two hard A-share constraints are enforced in the backtest layer:</p>
+
+<ol>
+  <li><strong>T+1</strong>：日线收盘-收盘持仓结构下，t 日收盘建仓的头寸最早于 t+1 日收盘平仓（持有满 1 日），T+1 约束结构性满足。
+    <span class="en">Under close-to-close daily holding, a position opened at t's close can be closed at t+1's close at the earliest — T+1 is structurally satisfied.</span></li>
+  <li><strong>停牌/涨跌停成交约束</strong>：<code>respect_mask_no_trade=True</code>（默认）时，mask=False 的交易日（停牌或触及涨跌停）既不能开仓也不能平仓——该资产持仓维持昨收、不计换手与成本。信号选择阶段已把 masked 资产排除在建仓之外；此处补齐"已持仓资产在跌停日卖不掉"这一半。
+    <span class="en">With <code>respect_mask_no_trade=True</code> (default), a masked day (suspension or price-limit) forbids both opening and closing — the position is held at yesterday's close with no turnover or cost. Signal selection already excludes masked assets from new positions; this closes the other half ("held asset can't be sold on a limit-down day").</span></li>
+</ol>
+
+<p><strong>调仓频率（v0.3.0 新增）</strong>：<code>rebalance_freq</code> 控制每 N 根 bar 才换一次仓，其间持仓不变、成本只在换仓日计提。实验 EXP-20260816-08 显示降频（freq=5）比信号平滑更有效地压换手且不衰减 IC。</p>
+<p class="en"><em>Rebalance frequency (v0.3.0)</em>: <code>rebalance_freq</code> rebalances once every N bars; positions are otherwise held and cost accrues only on rebalance days. EXP-20260816-08 shows down-sampling (freq=5) cuts turnover more effectively than smoothing, without decaying IC.</p>
+
+<p><strong>信号平滑</strong>：<code>signal_smoothing=λ</code> 用因果 EMA 平滑信号（s'_t = (1-λ)·s_t + λ·s'_{t-1}），降换手不引入 look-ahead；λ=0 等价原信号。</p>
+<p class="en"><em>Signal smoothing</em>: <code>signal_smoothing=λ</code> applies a causal EMA (s'_t = (1-λ)·s_t + λ·s'_{t-1}), reducing turnover without look-ahead; λ=0 is the identity.</p>
+
+<h2>11.4 交易成本模型 <span class="en">Cost Model</span></h2>
+
+<div class="math">总成本 = (tc_bps + slippage_bps) × turnover</div>
+
+<p>成本只在换仓日计提；停牌/涨跌停日持仓维持昨收不产生换手成本。</p>
+<p class="en">Cost accrues only on rebalance days; masked days hold at yesterday's close and incur no turnover cost.</p>
+
+<h2>11.5 绩效指标 <span class="en">Performance Metrics</span></h2>
+
+<table>
+  <thead>
+    <tr><th>指标 <span class="en">Metric</span></th><th>公式 <span class="en">Formula</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Sharpe Ratio</strong></td><td>(μ - r_f) / σ × √252</td><td>年化风险调整收益</td></tr>
+    <tr><td><strong>Max Drawdown</strong></td><td>max(peak - trough) / peak</td><td>净值百分比回撤</td></tr>
+    <tr><td><strong>Rank IC</strong></td><td>Spearman(signal[t], forward_return[t+1])</td><td>逐时步截面 rank IC</td></tr>
+    <tr><td><strong>ICIR</strong></td><td>mean(IC) / std(IC)</td><td>IC 的信息比率</td></tr>
+    <tr><td><strong>Hit Rate</strong></td><td>P(sign(signal) = sign(return))</td><td>方向准确率</td></tr>
+    <tr><td><strong>Turnover</strong></td><td>mean(|Δw|)</td><td>真实仓位换手</td></tr>
+  </tbody>
+</table>
+
+<div class="note">IC 对齐统一为 <strong>k→k+1</strong>（signal[t] 预测 p[t+1]−p[t]）；val-IC 为<strong>逐时步截面 rank IC</strong>（旧为 pooled Pearson）；回测换手率为<strong>真实仓位换手</strong>；MaxDD 为<strong>净值百分比</strong>回撤。
+<span class="en">IC is aligned to k→k+1 (signal[t] predicts p[t+1]−p[t]); val-IC is per-step cross-sectional rank IC (previously pooled Pearson); turnover is real position turnover; MaxDD is net-value percentage.</span></div>
+
+<!-- ==================== 12. 配置系统 ==================== -->
+<h1 class="chapter"><span class="num">12</span>配置系统 <span class="en">Configuration System</span></h1>
+
+<div class="note"><code>configs/*.yaml</code> 为<strong>参考死配置</strong>，未接入运行脚本。实际配置在各脚本的 <code>DEFAULT_CONFIG</code> 字典中。修改参数请直接改脚本内的 <code>DEFAULT_CONFIG</code>，或后续将 yaml 接线（见附录 C 待办）。
+<span class="en"><code>configs/*.yaml</code> are reference dead configs, not wired into runners. Actual config lives in each script's <code>DEFAULT_CONFIG</code> dict. Change parameters directly in <code>DEFAULT_CONFIG</code>, or wire the yaml later (§Appendix C).</span></div>
+
+<!-- ==================== 13. 实验结果 ==================== -->
+<h1 class="chapter"><span class="num">13</span>实验结果 <span class="en">Experimental Results</span></h1>
+
+<h2>13.1 新口径基线 <span class="en">New-Regime Baselines (2021–2025 daily, forward-adjusted, strictly out-of-sample)</span></h2>
+
+<div class="note">修复前全部实验数字作废（错列特征产物）。以下为通道契约与口径修复后的唯一有效数字，产物为 <code>outputs/EXP-20260816-*.json</code>，完整登记与 config hash 见 <code>docs/EXPERIMENT_REGISTRY.md</code>。
+<span class="en">All pre-repair numbers are void (artifacts of column misalignment). Below are the only valid post-repair figures, backed by <code>outputs/EXP-20260816-*.json</code>; full registration with config hashes lives in <code>docs/EXPERIMENT_REGISTRY.md</code>.</span></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>实验 <span class="en">Exp</span></th>
+      <th>变体 <span class="en">Variant</span></th>
+      <th class="num">IC</th>
+      <th class="num">t</th>
+      <th class="num">净 Sharpe <span class="en">Net Sharpe</span></th>
+      <th class="num">真实换手 <span class="en">Turnover</span></th>
+      <th>结论 <span class="en">Conclusion</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>EXP-…16-02</td><td>Ridge / 30 股</td><td class="num">+0.0001</td><td class="num">+0.01</td><td class="num">−1.10</td><td class="num">1.74</td><td>30 股无信号（股票池效应）</td></tr>
+    <tr><td>EXP-…16-03</td><td>DAFT / 30 股 quick</td><td class="num">+0.0077</td><td class="num">+0.51</td><td class="num">−1.66</td><td class="num">2.37</td><td>30 股同数量级 ≈0</td></tr>
+    <tr><td>EXP-…16-04</td><td>DAFT / 30 股 平滑 λ*=0.7</td><td class="num">+0.0128</td><td class="num">+0.81</td><td class="num">−0.14</td><td class="num">0.96</td><td>换手减半，Sharpe −1.66→−0.14</td></tr>
+    <tr><td>EXP-…16-05</td><td><strong>Ridge / 100 股 hs300</strong></td><td class="num"><strong>+0.0482</strong></td><td class="num"><strong>+5.19</strong></td><td class="num"><strong>+0.53</strong></td><td class="num">1.85</td><td><strong>基线即达 GO 线</strong></td></tr>
+    <tr><td>EXP-…16-06</td><td>DAFT / 100 股 quick</td><td class="num">+0.0368</td><td class="num">+3.65</td><td class="num">−1.72</td><td class="num">2.34</td><td>有信号，弱于 Ridge，换手吃收益</td></tr>
+    <tr><td>EXP-…16-07</td><td>DAFT / 100 股 平滑 λ*=0.7</td><td class="num">+0.0274</td><td class="num">+2.36</td><td class="num">−0.60</td><td class="num">0.98</td><td>换手减半，Sharpe 回升，仍输 Ridge</td></tr>
+    <tr><td>EXP-…16-08</td><td><strong>DAFT / 100 股 换手控制网格</strong></td><td class="num">+0.0353</td><td class="num">+3.50</td><td class="num"><strong>+0.25</strong></td><td class="num">0.63</td><td><strong>freq=5+λ=0+分数仓位 → test 净 Sharpe 转正</strong>；降频优于平滑</td></tr>
+    <tr><td>EXP-…16-10</td><td>DAFT / 100 股 更强平滑 λ∈{0.7,0.8,0.9}</td><td class="num">+0.0229</td><td class="num">+1.94</td><td class="num">−0.47</td><td class="num">0.75</td><td>平滑越强 Sharpe 越高但 IC 衰减，平滑路线近极限</td></tr>
+    <tr><td>EXP-…16-11</td><td>DAFT / 100 股 --full 训练</td><td class="num">+0.0251</td><td class="num">+2.51</td><td class="num">−1.33</td><td class="num">2.15</td><td>更多训练无益（OOS IC 低于 quick 0.037），加训练量路线证伪</td></tr>
+    <tr><td>EXP-…16-12</td><td>Ridge / 100 股 train 60%</td><td class="num">+0.0482</td><td class="num">+5.19</td><td class="num">+0.56</td><td class="num">1.83</td><td>Ridge 对训练量不敏感（727 天即够）</td></tr>
+    <tr><td>EXP-…16-13</td><td>DAFT / 100 股 walk-forward 2 折</td><td class="num">0.030±0.025</td><td class="num">—</td><td class="num">−1.09±0.55</td><td class="num">2.20</td><td>折间极不稳：折1 IC 0.013 弱，折2 IC 0.048 ≈ Ridge</td></tr>
+  </tbody>
+</table>
+
+<p>EXP-20260816-01（新口径基线、baostock 瞬时失败致股票池不全）与 EXP-20260816-09（多窗口首跑崩于对齐 bug，已并入 EXP-13）为过程记录，上表从 02 起列有效结果。</p>
+<p class="en">EXP-20260816-01 (baostock transient failure, incomplete universe) and EXP-20260816-09 (walk-forward first run crashed on an alignment bug, folded into EXP-13) are process records; the table lists valid results from 02 onward.</p>
+
+<h2>13.2 关键发现 <span class="en">Key Findings</span></h2>
+
+<ol>
+  <li>修复通道契约与对齐后，30 股 Ridge IC 从 0.029 塌到 ≈0——旧"弱信号"是错列特征产物；且 30 股无信号本身是<strong>股票池效应</strong>（权重股同质 + 截面太小）。
+    <span class="en">After the channel-contract and alignment fix, 30-name Ridge IC collapsed from 0.029 to ≈0 — the old "weak signal" was a misalignment artifact; and the 30-name null result is itself a universe-size effect (homogeneous heavy-weights + tiny cross-section).</span></li>
+  <li><strong>100 股 hs300 真实成分 + 涨跌停 mask 下，Ridge IC=0.048 / t=5.19 / 净 Sharpe=+0.53 — 基线即达预注册 GO 线。</strong>
+    <span class="en">Under 100-name hs300 constituents + price-limit mask, Ridge IC 0.048 / t 5.19 / net Sharpe +0.53 — the baseline already hits the pre-registered GO line.</span></li>
+  <li>DAFT 有信号（IC 0.035~0.037）但弱于 Ridge 且换手更高；换手控制（freq=5 + 分数仓位）把净 Sharpe 拉到 <strong>+0.25 转正</strong>，仍低于线性基线。
+    <span class="en">DAFT has signal (IC 0.035–0.037) but is weaker than Ridge and trades more; turnover control (freq=5 + signal-scaled positions) lifts net Sharpe to <strong>+0.25, positive</strong>, still below the linear baseline.</span></li>
+  <li><strong>加训练量证伪</strong>：DAFT --full 训练 OOS IC 0.025 反低于 quick 0.037；而 Ridge 对训练量不敏感（EXP-12）。DAFT 的训练量敏感在 walk-forward 折间暴露（折1 727d IC 0.013 vs 折2 969d IC 0.048）。
+    <span class="en"><strong>More training is disproved</strong>: DAFT --full training OOS IC 0.025 is lower than quick 0.037, while Ridge is training-size insensitive (EXP-12). DAFT's training-size sensitivity surfaces across walk-forward folds (fold-1 727d IC 0.013 vs fold-2 969d IC 0.048).</span></li>
+</ol>
+
+<h2>13.3 判定预判 <span class="en">Preliminary Verdict</span></h2>
+
+<p>对照预注册判据（IC ≥ 0.04 且 t ≥ 2.0 = GO）：DAFT 典型 IC 0.035~0.037 落入"有条件 GO"区间，但<strong>最优变体仍打不过 Ridge</strong>（0.035 &lt; 0.048），且换手控制后净 Sharpe +0.25 仍低于 Ridge +0.53 → <strong>判定书草稿预判 NO-GO（架构）方向</strong>。</p>
+<p class="en">Against the pre-registered criterion (IC ≥ 0.04 and t ≥ 2.0 = GO): DAFT's typical IC 0.035–0.037 falls in the "conditional GO" band, but the <em>best variant still loses to Ridge</em> (0.035 &lt; 0.048), and post-turnover-control net Sharpe +0.25 remains below Ridge +0.53 → <em>the draft decision leans NO-GO (architecture)</em>.</p>
+
+<p>正式签字前保留三条推翻路径：长历史训练（EXP-13 折2 显示训练量足够时 DAFT ≈ Ridge）、no-cdap/no-memory 消融归因、成本真实性重测。判定书见 <code>docs/DECISION_20260930.md</code>。</p>
+<p class="en">Three reversal paths remain open before final sign-off: long-history training (EXP-13 fold-2 shows DAFT ≈ Ridge with enough training), no-cdap/no-memory ablation attribution, and cost-realism re-testing. The decision document is <code>docs/DECISION_20260930.md</code>.</p>
+
+<!-- ==================== 14. 扩展指南 ==================== -->
+<h1 class="chapter"><span class="num">14</span>扩展指南 <span class="en">Extension Guide</span></h1>
+
+<h2>14.1 如何添加新专家 <span class="en">Adding a New Expert</span></h2>
+
+<pre># 1. 创建 src/daft/models/experts/my_expert.py
+from daft.models.experts.base_expert import BaseExpert
+
+class MyExpert(BaseExpert):
+    def _regime_filter(self, panel):
+        return my_regime_mask
+    def compute_loss(self, pred, target, mask):
+        return my_loss(pred, target, mask)
+
+# 2. 在 experts/__init__.py 注册
+# 3. 在 factory.py 的 build_experts() 中按 5 类 × 2 的约定加入
+# 4. 同步 N_EXPERTS 常量（并注意 conftest.py 的一致性）</pre>
+
+<h2>14.2 如何接入新数据源 <span class="en">Wiring a New Data Source</span></h2>
+
+<pre>class MyDataAdapter:
+    def fetch(self, symbols, start, end) -> Panel:
+        # 产出 OHLCV 布局 Panel，其余交给 ensure_base_panel
+        return Panel(values=..., mask=..., dates=..., ...)</pre>
+
+<h2>14.3 如何自定义路由策略 <span class="en">Custom Routing Strategy</span></h2>
+
+<pre>class MyRouter(RegimeRouter):
+    def forward(self, s_t, mode="train"):
+        return routing_probs, z_t
+# 在 factory.py 中替换 RegimeRouter</pre>
+
+<!-- ==================== 附录 A ==================== -->
+<h1 class="chapter"><span class="num">A</span>完整参数列表 <span class="en">Appendix A. Full Parameter List</span></h1>
+
+<h2>A.1 模型参数（10 专家） <span class="en">Model Parameters (10 experts)</span></h2>
+
+<table>
+  <thead>
+    <tr><th>模块 <span class="en">Module</span></th><th>参数 <span class="en">Parameters</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>RegimeRouter</td><td>input_dim=200, latent_dim=16, n_experts=10, top_k=3</td><td>潜空间路由</td></tr>
+    <tr><td>KDAMarketMemory</td><td>d_k=128, d_v=64, d_feature=200, bottleneck_ratio=4</td><td>在线记忆</td></tr>
+    <tr><td>CDAP</td><td>n_experts=10, d_k=128, d_v=64, joint_dim=64</td><td>三维互调</td></tr>
+    <tr><td>HardeningEngine</td><td>n_regimes=10, n_experts=10, threshold=100</td><td>非参数化</td></tr>
+    <tr><td>Experts (×10)</td><td>hidden_dim 64/48, n_layers=2</td><td>核心 ≈31.5 万</td></tr>
+    <tr><td>layer_proj</td><td>3 层 L0/L1/L2 投影</td><td>含此 ≈41.7 万</td></tr>
+  </tbody>
+</table>
+
+<h2>A.2 训练参数 <span class="en">Training Parameters</span></h2>
+
+<table>
+  <thead>
+    <tr><th>参数 <span class="en">Parameter</span></th><th>默认 <span class="en">Default</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Stage1 epochs / LR</td><td class="num">15 / 1e-3</td><td>独立专家训练</td></tr>
+    <tr><td>Stage2 epochs / LR</td><td class="num">20 / 1e-4</td><td>Router+Memory</td></tr>
+    <tr><td>Stage3 epochs / LR</td><td class="num">10 / 1e-5</td><td>联合微调</td></tr>
+    <tr><td>Stage4 n_steps</td><td class="num">200</td><td>硬化收集</td></tr>
+    <tr><td>CDAP warmup</td><td class="num">3 epochs</td><td>scale 预热</td></tr>
+    <tr><td>sparsity_weight</td><td class="num">0.01</td><td>熵正则权重（v0.3.0 从 0.05 调低）</td></tr>
+  </tbody>
+</table>
+
+<h2>A.3 回测参数 <span class="en">Backtest Parameters</span></h2>
+
+<table>
+  <thead>
+    <tr><th>参数 <span class="en">Parameter</span></th><th>默认 <span class="en">Default</span></th><th>说明 <span class="en">Meaning</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>transaction_cost_bps</code></td><td class="num">2.0</td><td>手续费</td></tr>
+    <tr><td><code>slippage_bps</code></td><td class="num">1.0</td><td>滑点</td></tr>
+    <tr><td><code>top_quantile</code></td><td class="num">0.2</td><td>做多分位</td></tr>
+    <tr><td><code>long_only</code></td><td class="num">True</td><td>仅做多</td></tr>
+    <tr><td><code>rebalance_freq</code></td><td class="num">1</td><td>调仓频率（v0.3.0）</td></tr>
+    <tr><td><code>weight_mode</code></td><td class="num">equal</td><td>equal / signal_zscore（v0.3.0）</td></tr>
+  </tbody>
+</table>
+
+<!-- ==================== 附录 B ==================== -->
+<h1 class="chapter"><span class="num">B</span>文件结构索引 <span class="en">Appendix B. File Structure Index</span></h1>
+
+<pre>daft/
+├── README.md
+├── LICENSE
+├── pyproject.toml                    # version 字段需与 __init__.py 同步
+│
+├── docs/
+│   ├── SPECIFICATION.md              # ★ 本文档 — 技术说明书
+│   ├── guided-tour.md                # 代码走读导览
+│   ├── FIX_REPORT_20260816.md        # 修复与重验报告（PR #9）
+│   ├── EXPERIMENT_REGISTRY.md        # 实验登记 & 预注册判据
+│   ├── ROADMAP.md                    # 路线图与挂起项
+│   ├── PROJECT_EVALUATION.md         # 项目评判评分卡
+│   ├── DECISION_20260930.md          # Go/No-Go 判定书（草稿）
+│   └── ...
+│
+├── configs/                          # 参考死配置（未接线）
+│
+├── src/daft/
+│   ├── __init__.py                   # __version__
+│   ├── data/
+│   │   ├── panel.py                  # Panel 数据结构 (T×N×F)
+│   │   ├── loaders.py                # DataLoader + 合成数据
+│   │   └── adapters/                 # baostock / yfinance
+│   ├── features/
+│   │   ├── base_features.py          # ★ 通道契约 ensure_base_panel
+│   │   ├── tensor_factors.py         # 7 GPU 原语
+│   │   ├── legacy_factors.py         # 35 经典因子（未接入）
+│   │   ├── regime_features.py        # s_t 200 维构造
+│   │   └── freq_features.py          # FFT 频域（未接入）
+│   ├── models/
+│   │   ├── router.py                 # [C1] RegimeRouter
+│   │   ├── memory.py                 # [C2] KDA Market Memory
+│   │   ├── cross_dim_attn.py         # [C3] CDAP
+│   │   ├── hardening.py              # [C4] AHM
+│   │   ├── ensemble.py               # ExpertEnsemble
+│   │   ├── factory.py                # ★ 模型工厂（v0.3.0）
+│   │   └── experts/                  # 5 类专家
+│   │       ├── base_expert.py
+│   │       ├── trend_expert.py
+│   │       ├── reversal_expert.py
+│   │       ├── volatility_expert.py
+│   │       ├── event_expert.py
+│   │       └── momentum_expert.py    # ★ v0.3.0
+│   ├── training/
+│   │   ├── expert_trainer.py         # Stage 1
+│   │   ├── router_trainer.py         # Stage 2
+│   │   └── joint_trainer.py          # Stage 3
+│   ├── portfolio/markowitz.py
+│   ├── backtest/engine.py
+│   └── utils/                        # metrics.py, device.py
+│
+├── scripts/                          # 运行脚本（DEFAULT_CONFIG 为准）
+└── tests/                            # 396 项测试</pre>
+
+<!-- ==================== 附录 C ==================== -->
+<h1 class="chapter"><span class="num">C</span>已知问题和 TODO <span class="en">Appendix C. Known Issues &amp; TODO</span></h1>
+
+<h2>C.1 已知结构性问题 <span class="en">Known Structural Issues</span></h2>
+
+<ol>
+  <li><strong>路由最大熵</strong> — routing entropy ratio 接近理论最大值 ln(10) ≈ 2.303，10 个专家几乎均匀激活，MoE 退化为普通 ensemble。可能的解决方向：降低 Top-K、添加熵正则、在真实行情数据上测试、curriculum learning 降温度。
+    <span class="en">Routing entropy ratio nears the theoretical maximum ln(10) ≈ 2.303 — the 10 experts activate almost uniformly and the MoE degenerates into an ordinary ensemble.</span></li>
+  <li><strong>top-3 稀疏未真正落实（挂起）</strong> — 专家池为<strong>稠密软门控</strong>（所有专家都计算，软概率加权融合），"Top-K 稀疏"目前只是声明。<strong>决策：挂起</strong>，稠密软门控可跑通实验，稀疏是推理优化，判定后再决定。
+    <span class="en">The expert pool is dense soft-gating; "Top-K sparsity" is a claim only. <em>Decision: deferred</em> — dense soft-gating runs the experiments; sparsity is an inference optimization to revisit after the verdict.</span></li>
+  <li><strong>AHM 未接线（挂起，默认禁用）</strong> — <code>detect_regime_shift</code> / <code>evict</code> 在生产管线中的调用未完成。<strong>决策：挂起</strong>，推理加速不应先于信号验证。
+    <span class="en">AHM is not wired into the production pipeline. <em>Decision: deferred</em> — inference speedup should not precede signal validation.</span></li>
+  <li><strong>legacy 因子 / FFT 未接入</strong> — 35 个 legacy 因子和 FFT 频域特征是独立模块，不参与训练/评估。需接入或明确其定位。
+    <span class="en">35 legacy factors and FFT features are standalone modules, unused in training/eval.</span></li>
+  <li><strong>residual-gate-port 分支挂起</strong> — <code>feat/residual-gate-port</code>（记忆门收缩先验 CP1-CP11）的数学推理部分与 v0.3.0 CDAP logit 空间修复冲突。<strong>决策：挂起，不移植</strong>，数学实现保留不动；移植条件是 M5 判定为 GO 或有条件 GO 后按新架构重做。
+    <span class="en">The <code>feat/residual-gate-port</code> branch (memory-gate shrinkage prior CP1–CP11) conflicts with the v0.3.0 CDAP logit-space fix. <em>Decision: deferred, not ported</em>; port only after an M5 GO / conditional-GO verdict, under the new architecture.</span></li>
+</ol>
+
+<h2>C.2 已修复（历史记录） <span class="en">Fixed (Historical)</span></h2>
+
+<ul>
+  <li><strong>CDAP memory_gate 死通路</strong> — memory_gate_scale 早期始终为 0，2026-08-07 通过修复 safe_gate 与 route_modulate 的梯度断路解决。
+    <span class="en">memory_gate_scale was pinned at 0; fixed 2026-08-07 by repairing the gradient break in safe_gate and route_modulate.</span></li>
+  <li><strong>通道契约错列</strong> — 2026-08-16 通过 base_features.py::ensure_base_panel 解决。
+    <span class="en">Channel-contract misalignment, fixed via ensure_base_panel.</span></li>
+  <li><strong>n_experts 不一致崩溃</strong> — 2026-08-16 通过 factory.py 单一入口 + 一致性 assert 解决。
+    <span class="en">n_experts inconsistency crash, fixed via the factory single entry + consistency assert.</span></li>
+  <li><strong>涨跌停 mask + hs300 成分股池</strong> — 2026-08-16（v0.3.0），见 4.6。
+    <span class="en">Price-limit mask + hs300 universe (v0.3.0), §4.6.</span></li>
+  <li><strong>交易制度约束（T+1 / 成交约束 / 调仓频率 / 分数仓位）</strong> — 2026-08-16（v0.3.0），见 11.3。
+    <span class="en">Trading-regime constraints (v0.3.0), §11.3.</span></li>
+</ul>
+
+<h2>C.3 待实现功能 <span class="en">Pending Work</span></h2>
+
+<table>
+  <thead>
+    <tr><th>功能 <span class="en">Item</span></th><th>说明 <span class="en">Detail</span></th><th>优先级 <span class="en">Priority</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>消融归因</td><td>no-cdap / no-memory 组件贡献归因</td><td>高（NO-GO 签字前）</td></tr>
+    <tr><td>长历史训练验证</td><td>训练量足够时 DAFT ≈ Ridge 的路径复核（EXP-13 折2）</td><td>高（NO-GO 签字前）</td></tr>
+    <tr><td>成本真实性重测</td><td>冲击模型（T+1/涨跌停已做，剩按 ADV 的冲击）</td><td>高（NO-GO 签字前）</td></tr>
+    <tr><td>配置系统接线</td><td>configs/*.yaml 接入脚本</td><td>中</td></tr>
+    <tr><td>换手率约束</td><td>组合优化加 turnover constraint</td><td>中</td></tr>
+    <tr><td>top-3 稀疏</td><td>真正实现专家稀疏计算（判定后）</td><td>低</td></tr>
+  </tbody>
+</table>
+
+<h2>C.4 未来方向 <span class="en">Future Directions</span></h2>
+
+<ul>
+  <li>若 <strong>GO</strong>：扩池到 300 股、Markowitz 组合优化接入、分钟级中频（见 ROADMAP v0.4/v0.5）。
+    <span class="en">If GO: 300-name universe, Markowitz integration, minute-level mid-frequency.</span></li>
+  <li>若 <strong>NO-GO</strong>：转型"LLM 架构金融化改造"研究项目，保留 CDAP/KDA 架构作研究载体，面向论文/比赛/教学，停止交易系统投入。
+    <span class="en">If NO-GO: pivot to an "LLM-architecture financialization" research project, keeping CDAP/KDA as a research vehicle.</span></li>
+  <li>与 Time-MoE (ICLR 2025) 做系统性的样本外对比。
+    <span class="en">Systematic out-of-sample comparison against Time-MoE.</span></li>
+  <li><code>feat/residual-gate-port</code> 在判定为 GO 后按新架构重做移植（见 C.1-5）。
+    <span class="en">Re-port residual-gate-port under the new architecture after a GO verdict.</span></li>
+</ul>
+
+<!-- ==================== 附录 D ==================== -->
+<h1 class="chapter"><span class="num">D</span>运行逻辑工程图 <span class="en">Appendix D. Runtime Logic Diagrams</span></h1>
+
+<p>本章以工程图的形式，按<strong>数据 → 特征 → 模型 → 信号 → 回测 → 判定</strong>六段，逐步拆解 DAFT 的完整运行逻辑。图 D.1 是端到端总览；图 D.2 展开核心模型的 7 步前向传播；图 D.3 与 D.4 分别对 CDAP 三维互调与 KDA 记忆更新做特写；图 D.5 给出训练四阶段的衔接关系。所有张量形状标注均与 <code>src/daft</code> 实现一一对应。</p>
+<p class="en">This chapter diagrams the full runtime logic of DAFT across six stages — data → features → model → signal → backtest → verdict. D.1 is the end-to-end overview; D.2 expands the 7-step forward pass; D.3 and D.4 zoom into the CDAP cross-dimension modulation and the KDA delta-rule memory update; D.5 shows how the four training stages chain together. Every tensor shape is taken directly from <code>src/daft</code>.</p>
+
+<figure class="diagram">
+<svg class="diag" viewBox="0 0 700 600" width="172mm" height="147.4mm" role="img" aria-label="端到端数据流">
+  <defs>
+    <marker id="arD1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+  </defs>
+
+  <!-- 数据源三选一 -->
+  <rect class="bx-soft" x="90" y="18" width="110" height="40" rx="5"/>
+  <text class="lb" x="145" y="33">synthetic</text>
+  <text class="sh mono" x="145" y="47">HMM · 3-regime</text>
+  <rect class="bx-soft" x="285" y="18" width="110" height="40" rx="5"/>
+  <text class="lb" x="340" y="33">baostock</text>
+  <text class="sh mono" x="340" y="47">A 股日线</text>
+  <rect class="bx-soft" x="480" y="18" width="110" height="40" rx="5"/>
+  <text class="lb" x="535" y="33">yfinance</text>
+  <text class="sh mono" x="535" y="47">全球行情</text>
+
+  <line class="edge" x1="145" y1="58" x2="335" y2="74" marker-end="url(#arD1)"/>
+  <line class="edge" x1="340" y1="58" x2="350" y2="74" marker-end="url(#arD1)"/>
+  <line class="edge" x1="535" y1="58" x2="365" y2="74" marker-end="url(#arD1)"/>
+
+  <rect class="bx" x="260" y="76" width="180" height="36" rx="6"/>
+  <text class="lb" x="350" y="94">DataLoader.load()</text>
+
+  <line class="edge" x1="350" y1="112" x2="350" y2="130" marker-end="url(#arD1)"/>
+  <text class="sh mono" x="400" y="121" text-anchor="start">Panel (T,N,5)</text>
+
+  <rect class="bx" x="170" y="132" width="360" height="58" rx="6"/>
+  <text class="tt" x="350" y="156">RegimeFeatureExtractor · 特征提取</text>
+  <text class="lb-mut" x="350" y="176">ensure_base_panel → 6 组因子拼接 → 200 维市场状态</text>
+
+  <line class="edge" x1="350" y1="190" x2="350" y2="208" marker-end="url(#arD1)"/>
+  <text class="sh mono" x="400" y="199" text-anchor="start">s_t (T,N,200)</text>
+
+  <rect class="bx" x="210" y="210" width="280" height="42" rx="6"/>
+  <text class="lb" x="350" y="231">layer_proj · L0 / L1 / L2（层级投影）</text>
+
+  <line class="edge" x1="350" y1="252" x2="350" y2="270" marker-end="url(#arD1)"/>
+  <text class="sh mono" x="400" y="261" text-anchor="start">[L0,L1,L2] (T,N,64)</text>
+
+  <rect class="bx-fill" x="170" y="272" width="360" height="62" rx="6"/>
+  <text class="tt-w" x="350" y="296">ExpertEnsemble · 核心模型</text>
+  <text class="lb-w" x="350" y="316">Router · KDA Memory · CDAP · 10 Experts</text>
+
+  <line class="edge" x1="350" y1="334" x2="350" y2="352" marker-end="url(#arD1)"/>
+  <text class="sh mono" x="400" y="343" text-anchor="start">signal (T,N)</text>
+
+  <rect class="bx" x="170" y="354" width="360" height="56" rx="6"/>
+  <text class="tt" x="350" y="376">BacktestEngine · 回测引擎</text>
+  <text class="lb-mut" x="350" y="395">分位选股 · 交易成本 · T+1 · 涨跌停约束</text>
+
+  <line class="edge" x1="350" y1="410" x2="350" y2="428" marker-end="url(#arD1)"/>
+  <text class="sh mono" x="400" y="419" text-anchor="start">Sharpe · IC · ICIR · MaxDD</text>
+
+  <rect class="bx-acc" x="210" y="430" width="280" height="56" rx="6"/>
+  <text class="tt-w" x="350" y="452">Go / No-Go 判定</text>
+  <text class="lb-w" x="350" y="471">IC ≥ 0.04 且 t ≥ 2.0</text>
+
+  <line class="edge" x1="350" y1="486" x2="350" y2="510" marker-end="url(#arD1)"/>
+  <text class="lb-mut" x="350" y="522">预判方向：NO-GO（架构） · 判定期 2026-09-30</text>
+</svg>
+<figcaption><b>图 D.1</b> 端到端运行逻辑总览。数据源三选一 → 特征提取 → 层级投影 → 核心模型 → 回测 → Go/No-Go 判定。
+<span class="en"><b>Figure D.1</b> End-to-end runtime pipeline: one of three data sources → feature extraction → layer projection → core model → backtest → Go/No-Go verdict.</span></figcaption>
+</figure>
+
+<figure class="diagram">
+<svg class="diag" viewBox="0 0 700 700" width="172mm" height="172mm" role="img" aria-label="模型前向传播">
+  <defs>
+    <marker id="arD2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+    <marker id="arD2a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk-a"/></marker>
+  </defs>
+
+  <!-- 输入 -->
+  <rect class="tns" x="280" y="22" width="140" height="32" rx="5"/>
+  <text class="sh mono" x="350" y="38">s_t (B,200)</text>
+
+  <!-- 三个并行模块 -->
+  <rect class="bx" x="30" y="90" width="180" height="42" rx="6"/>
+  <text class="tt" x="120" y="108">RegimeRouter</text>
+  <text class="sh" x="120" y="124">潜空间 200→16</text>
+  <rect class="bx" x="250" y="90" width="200" height="42" rx="6"/>
+  <text class="tt" x="350" y="108">layer_proj</text>
+  <text class="sh" x="350" y="124">L0 / L1 / L2</text>
+  <rect class="bx" x="490" y="90" width="180" height="42" rx="6"/>
+  <text class="tt" x="580" y="108">Experts ×10</text>
+  <text class="sh" x="580" y="124">5 类 ×2</text>
+
+  <line class="edge" x1="280" y1="38" x2="150" y2="90" marker-end="url(#arD2)"/>
+  <line class="edge" x1="350" y1="54" x2="350" y2="90" marker-end="url(#arD2)"/>
+  <line class="edge" x1="420" y1="38" x2="550" y2="90" marker-end="url(#arD2)"/>
+
+  <!-- 模块输出张量 -->
+  <rect class="tns" x="30" y="168" width="180" height="28" rx="5"/>
+  <text class="sh mono" x="120" y="182">z_t(16) · probs(10)</text>
+  <rect class="tns" x="260" y="168" width="180" height="28" rx="5"/>
+  <text class="sh mono" x="350" y="182">[L0,L1,L2] (B,64)</text>
+  <rect class="tns" x="500" y="168" width="160" height="28" rx="5"/>
+  <text class="sh mono" x="580" y="182">signal_i (B,1) ×10</text>
+
+  <line class="edge" x1="120" y1="132" x2="120" y2="168" marker-end="url(#arD2)"/>
+  <line class="edge" x1="350" y1="132" x2="350" y2="168" marker-end="url(#arD2)"/>
+  <line class="edge" x1="580" y1="132" x2="580" y2="168" marker-end="url(#arD2)"/>
+
+  <!-- 记忆状态 + CDAP -->
+  <rect class="tns" x="30" y="232" width="140" height="28" rx="5"/>
+  <text class="sh mono" x="100" y="246">M_{t-1} (B,128,64)</text>
+  <rect class="bx-acc" x="200" y="232" width="300" height="60" rx="6"/>
+  <text class="tt-w" x="350" y="253">Cross-Dimension Attention (CDAP)</text>
+  <text class="lb-w" x="350" y="273">j = e ⊙ m ⊙ d ∈ R⁶⁴</text>
+
+  <path class="edge" d="M120,196 L120,216 L215,216 L215,232" marker-end="url(#arD2)"/>
+  <line class="edge" x1="350" y1="196" x2="350" y2="232" marker-end="url(#arD2)"/>
+  <line class="edge" x1="170" y1="246" x2="200" y2="246" marker-end="url(#arD2)"/>
+
+  <!-- CDAP 三路反向投影 -->
+  <rect class="tns" x="30" y="330" width="170" height="28" rx="5"/>
+  <text class="sh mono" x="115" y="344">routing_mod (B,10)</text>
+  <rect class="tns" x="240" y="330" width="200" height="28" rx="5"/>
+  <text class="sh mono" x="340" y="344">memory_gate (B,128)</text>
+  <rect class="tns" x="460" y="330" width="100" height="28" rx="5"/>
+  <text class="sh mono" x="510" y="344">depth_w (B,3)</text>
+
+  <path class="edge" d="M230,292 L230,320 L115,320 L115,330" marker-end="url(#arD2)"/>
+  <line class="edge" x1="350" y1="292" x2="350" y2="330" marker-end="url(#arD2)"/>
+  <path class="edge" d="M470,292 L470,320 L510,320 L510,330" marker-end="url(#arD2)"/>
+
+  <!-- Memory 更新 + fused_layers -->
+  <rect class="bx" x="240" y="395" width="200" height="42" rx="6"/>
+  <text class="tt" x="340" y="411">KDA Memory</text>
+  <text class="sh" x="340" y="426">delta rule · M_t 反馈</text>
+  <rect class="tns" x="460" y="395" width="100" height="28" rx="5"/>
+  <text class="sh mono" x="510" y="409">fused (B,64)</text>
+
+  <line class="edge" x1="340" y1="358" x2="340" y2="395" marker-end="url(#arD2)"/>
+  <line class="edge" x1="510" y1="358" x2="510" y2="395" marker-end="url(#arD2)"/>
+
+  <!-- retrieved -->
+  <rect class="tns" x="240" y="474" width="200" height="28" rx="5"/>
+  <text class="sh mono" x="340" y="488">retrieved (B,64)</text>
+  <line class="edge" x1="340" y1="437" x2="340" y2="474" marker-end="url(#arD2)"/>
+
+  <!-- 融合 -->
+  <rect class="bx-fill" x="230" y="540" width="340" height="54" rx="6"/>
+  <text class="tt-w" x="400" y="560">signal = Σᵢ wᵢ·expertᵢ + 0.1·mean(fused+retrieved)</text>
+  <text class="lb-w" x="400" y="579">加权融合 · Weighted Fusion</text>
+
+  <path class="edge" d="M115,358 L115,540 L230,540" marker-end="url(#arD2)"/>
+  <path class="edge-a" d="M580,196 L580,540 L570,540" marker-end="url(#arD2a)"/>
+  <path class="edge" d="M510,423 L510,540" marker-end="url(#arD2)"/>
+  <line class="edge" x1="340" y1="502" x2="340" y2="540" marker-end="url(#arD2)"/>
+
+  <text class="lb-mut" x="593" y="370" text-anchor="start">信号主路径</text>
+  <text class="sh" x="593" y="385" text-anchor="start">signal path</text>
+
+  <!-- 输出 -->
+  <rect class="tns" x="300" y="630" width="200" height="28" rx="5"/>
+  <text class="sh mono" x="400" y="644">signal (B,1)</text>
+  <line class="edge" x1="400" y1="594" x2="400" y2="630" marker-end="url(#arD2)"/>
+</svg>
+<figcaption><b>图 D.2</b> 核心模型 7 步前向传播。青色箭头为信号主路径（Experts → 融合），灰色为调制/权重路径（Router → CDAP → 融合；layer_proj → CDAP → Memory/fused）。CDAP 在记忆更新<em>之前</em>执行，使 memory_gate 能以同一计算图直接传入 KDA 更新，保证梯度回传完整。
+<span class="en"><b>Figure D.2</b> The 7-step forward pass. Cyan = signal path (Experts → fusion); grey = modulation/weight path (Router → CDAP → fusion; layer_proj → CDAP → Memory/fused). CDAP runs <em>before</em> memory so memory_gate flows into the KDA update on the same graph, keeping the gradient path intact.</span></figcaption>
+</figure>
+
+<figure class="diagram">
+<svg class="diag" viewBox="0 0 700 460" width="172mm" height="113mm" role="img" aria-label="CDAP 三维互调">
+  <defs>
+    <marker id="arD3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+  </defs>
+
+  <!-- 左列：三路输入 -->
+  <rect class="bx" x="20" y="40" width="180" height="52" rx="6"/>
+  <text class="tt" x="110" y="60">routing_probs (B,10)</text>
+  <text class="sh" x="110" y="78">expert_to_joint · 10→64 → e</text>
+  <rect class="bx" x="20" y="140" width="180" height="52" rx="6"/>
+  <text class="tt" x="110" y="160">M (B,128,64)</text>
+  <text class="sh" x="110" y="178">mean → memory_to_joint · 64→64 → m</text>
+  <rect class="bx" x="20" y="240" width="180" height="52" rx="6"/>
+  <text class="tt" x="110" y="260">[L0,L1,L2] (B,64)×3</text>
+  <text class="sh" x="110" y="278">depth_to_joint · 192→64 → d</text>
+
+  <!-- 中列：joint space -->
+  <rect class="bx-acc" x="250" y="110" width="200" height="120" rx="6"/>
+  <text class="tt-w" x="350" y="152">joint = e ⊙ m ⊙ d</text>
+  <text class="lb-w" x="350" y="174">∈ R⁶⁴ · 逐元素乘</text>
+  <text class="lb-w" x="350" y="196">任一维近零即静默互调</text>
+
+  <line class="edge" x1="200" y1="66" x2="250" y2="140" marker-end="url(#arD3)"/>
+  <text class="eq" x="222" y="92">e</text>
+  <line class="edge" x1="200" y1="166" x2="250" y2="170" marker-end="url(#arD3)"/>
+  <text class="eq" x="222" y="160">m</text>
+  <line class="edge" x1="200" y1="266" x2="250" y2="200" marker-end="url(#arD3)"/>
+  <text class="eq" x="222" y="245">d</text>
+
+  <!-- 右列：三路反向投影 -->
+  <rect class="bx" x="500" y="40" width="180" height="52" rx="6"/>
+  <text class="tt" x="590" y="60">joint_to_expert 64→10</text>
+  <text class="sh" x="590" y="78">softmax(log p + δ·bias) → routing_mod</text>
+  <rect class="bx" x="500" y="140" width="180" height="52" rx="6"/>
+  <text class="tt" x="590" y="160">joint_to_memory 64→128</text>
+  <text class="sh" x="590" y="178">sigmoid → memory_gate</text>
+  <rect class="bx" x="500" y="240" width="180" height="52" rx="6"/>
+  <text class="tt" x="590" y="260">joint_to_depth 64→3</text>
+  <text class="sh" x="590" y="278">softmax → depth_weights</text>
+
+  <line class="edge" x1="450" y1="140" x2="500" y2="66" marker-end="url(#arD3)"/>
+  <line class="edge" x1="450" y1="170" x2="500" y2="166" marker-end="url(#arD3)"/>
+  <line class="edge" x1="450" y1="200" x2="500" y2="266" marker-end="url(#arD3)"/>
+
+  <!-- fused_layers -->
+  <rect class="tns" x="260" y="340" width="180" height="30" rx="5"/>
+  <text class="sh mono" x="350" y="355">fused_layers = Σ_k depth_w[k]·L_k</text>
+  <line class="edge" x1="590" y1="292" x2="450" y2="345" marker-end="url(#arD3)"/>
+
+  <text class="lb-mut" x="350" y="400">三个信息维度投影到共享潜空间 j，逐元素相乘后反向投影回各自维度（残差式修正）。</text>
+</svg>
+<figcaption><b>图 D.3</b> CDAP 三维互调。路由（e）、记忆（m）、深度（d）三路先投影到共享潜空间 <code>j = e ⊙ m ⊙ d</code>，再用<em>逐元素乘</em>而非加法融合——任一维激活趋零即静默整条互调，避免加性噪声。
+<span class="en"><b>Figure D.3</b> CDAP cross-dimension modulation. Routing (e), memory (m), and depth (d) project into a shared latent space <code>j = e ⊙ m ⊙ d</code>, fused by <em>element-wise product</em> rather than addition — a near-zero activation in any dimension silences the whole modulation instead of adding noise.</span></figcaption>
+</figure>
+
+<figure class="diagram">
+<svg class="diag" viewBox="0 0 720 480" width="172mm" height="114.7mm" role="img" aria-label="KDA 记忆更新">
+  <defs>
+    <marker id="arD4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+  </defs>
+
+  <!-- 左列：输入与投影 -->
+  <rect class="tns" x="40" y="40" width="160" height="30" rx="5"/>
+  <text class="sh mono" x="120" y="55">s_t (B,200)</text>
+  <rect class="bx" x="40" y="100" width="160" height="180" rx="6"/>
+  <text class="tt" x="120" y="120">投影 Projections</text>
+  <text class="lb-mut" x="120" y="144">α = forget(s_t)</text>
+  <text class="sh" x="120" y="162">×route_mod(z_t)·cdap_gate</text>
+  <text class="lb-mut" x="120" y="188">β = σ(beta_proj(s_t))</text>
+  <text class="lb-mut" x="120" y="212">k = ‖k_proj(s_t)‖₂</text>
+  <text class="lb-mut" x="120" y="236">v = v_proj(s_t)</text>
+  <text class="lb-mut" x="120" y="260">q = q_proj(s_t)</text>
+  <line class="edge" x1="120" y1="70" x2="120" y2="100" marker-end="url(#arD4)"/>
+
+  <!-- 中列：M 更新 -->
+  <rect class="tns" x="280" y="60" width="160" height="30" rx="5"/>
+  <text class="sh mono" x="360" y="75">M_{t-1} (B,128,64)</text>
+  <rect class="bx-acc" x="270" y="110" width="180" height="180" rx="6"/>
+  <text class="tt-w" x="360" y="132">KDA Delta-Rule</text>
+  <text class="lb-w" x="360" y="158">① M ← α ⊙ M</text>
+  <text class="sh" x="360" y="176" fill="#a9c8d9">逐通道遗忘 forget</text>
+  <text class="lb-w" x="360" y="202">② M ← M − β·k⊗(M·k)</text>
+  <text class="sh" x="360" y="220" fill="#a9c8d9">纠错修正 correct</text>
+  <text class="lb-w" x="360" y="246">③ M ← M + β·k⊗v</text>
+  <text class="sh" x="360" y="264" fill="#a9c8d9">写入新记忆 write</text>
+  <rect class="tns" x="280" y="310" width="160" height="30" rx="5"/>
+  <text class="sh mono" x="360" y="325">M_t (B,128,64)</text>
+
+  <line class="edge" x1="200" y1="190" x2="270" y2="190" marker-end="url(#arD4)"/>
+  <text class="sh" x="235" y="205">α β k v q</text>
+  <line class="edge" x1="360" y1="90" x2="360" y2="110" marker-end="url(#arD4)"/>
+  <line class="edge" x1="360" y1="290" x2="360" y2="310" marker-end="url(#arD4)"/>
+
+  <!-- 右列：检索与输出 -->
+  <rect class="bx" x="510" y="110" width="180" height="44" rx="6"/>
+  <text class="tt" x="600" y="127">检索 o = Mᵀ·q</text>
+  <text class="sh" x="600" y="143">(B,64)</text>
+  <rect class="bx" x="510" y="180" width="180" height="44" rx="6"/>
+  <text class="tt" x="600" y="196">output gate</text>
+  <text class="sh" x="600" y="213">σ(W_up·SiTU(W_down·s_t)) ⊙ o</text>
+  <rect class="tns" x="510" y="250" width="180" height="30" rx="5"/>
+  <text class="sh mono" x="600" y="265">retrieved (B,64)·RMSNorm</text>
+
+  <line class="edge" x1="440" y1="325" x2="510" y2="132" marker-end="url(#arD4)"/>
+  <line class="edge" x1="600" y1="154" x2="600" y2="180" marker-end="url(#arD4)"/>
+  <line class="edge" x1="600" y1="224" x2="600" y2="250" marker-end="url(#arD4)"/>
+
+  <!-- 记忆反馈 -->
+  <path class="grp" d="M440,325 L470,325 L470,75 L440,75"/>
+  <text class="sh" x="486" y="200" text-anchor="start">M_t → 下一时刻 M_{t-1}</text>
+</svg>
+<figcaption><b>图 D.4</b> KDA 市场记忆的 Delta-Rule 在线更新。遗忘门 α 受三个来源调制（自身 safe gate、路由潜向量 z_t、CDAP 的 memory_gate），随后执行「遗忘 → 纠错 → 写入」三步更新，固定尺寸 <code>M ∈ R^{128×64}</code> 与序列长度无关，检索经 output gate 与 RMSNorm 输出。
+<span class="en"><b>Figure D.4</b> KDA memory delta-rule update. The forget gate α is modulated by three sources (its own safe gate, the routing latent z_t, and CDAP's memory_gate), followed by the three-step update forget → correct → write. The fixed-size <code>M ∈ R^{128×64}</code> is independent of sequence length; retrieval passes through the output gate and RMSNorm.</span></figcaption>
+</figure>
+
+<figure class="diagram">
+<svg class="diag" viewBox="0 0 720 300" width="172mm" height="71.7mm" role="img" aria-label="训练四阶段">
+  <defs>
+    <marker id="arD5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="mk"/></marker>
+  </defs>
+
+  <rect class="bx-fill" x="10" y="40" width="160" height="150" rx="6"/>
+  <text class="tt-w" x="90" y="64">① 独立专家训练</text>
+  <text class="sh" x="90" y="84" fill="#a9c8d9">StageExpertTrainer</text>
+  <text class="lb-w" x="90" y="112">regime mask 选数据</text>
+  <text class="lb-w" x="90" y="132">各自专用 loss</text>
+  <text class="lb-w" x="90" y="152">LR = 1e-3</text>
+  <text class="lb-w" x="90" y="172">冻结专家参数</text>
+
+  <rect class="bx-fill" x="190" y="40" width="160" height="150" rx="6"/>
+  <text class="tt-w" x="270" y="64">② Router+Memory</text>
+  <text class="sh" x="270" y="84" fill="#a9c8d9">RouterTrainer</text>
+  <text class="lb-w" x="270" y="112">冻结专家</text>
+  <text class="lb-w" x="270" y="132">CDAP δ = 0.1</text>
+  <text class="lb-w" x="270" y="152">温度 1.0 → 0.1</text>
+  <text class="lb-w" x="270" y="172">熵 + 稀疏正则</text>
+
+  <rect class="bx-fill" x="370" y="40" width="160" height="150" rx="6"/>
+  <text class="tt-w" x="450" y="64">③ 联合微调</text>
+  <text class="sh" x="450" y="84" fill="#a9c8d9">JointTrainer</text>
+  <text class="lb-w" x="450" y="112">全部解冻</text>
+  <text class="lb-w" x="450" y="132">CDAP δ = 1.0</text>
+  <text class="lb-w" x="450" y="152">LR = 1e-5（专家 1e-6）</text>
+  <text class="lb-w" x="450" y="172">早停看 IC</text>
+
+  <rect class="bx-soft" x="550" y="40" width="160" height="150" rx="6"/>
+  <text class="tt" x="630" y="64">④ 硬化收集</text>
+  <text class="sh" x="630" y="84">HardeningEngine</text>
+  <text class="lb-mut" x="630" y="112">统计收集（AHM）</text>
+  <text class="lb-mut" x="630" y="132">默认禁用</text>
+  <text class="lb-mut" x="630" y="152">不参与训练 / 评估</text>
+
+  <line class="edge" x1="170" y1="115" x2="190" y2="115" marker-end="url(#arD5)"/>
+  <line class="edge" x1="350" y1="115" x2="370" y2="115" marker-end="url(#arD5)"/>
+  <line class="edge" x1="530" y1="115" x2="550" y2="115" marker-end="url(#arD5)"/>
+
+  <text class="lb-mut" x="360" y="235">Stage 1 → 2 → 3 顺序执行；Stage 4 为推理加速的统计收集，判定期内挂起。</text>
+</svg>
+<figcaption><b>图 D.5</b> 训练四阶段衔接。专家先独立训练（Stage 1）并冻结，再训练 Router+Memory+CDAP（Stage 2，低调制强度 + 温度退火），随后全解冻联合微调（Stage 3，低学习率防灾难遗忘）。Stage 4 硬化收集默认禁用、不参与信号验证。
+<span class="en"><b>Figure D.5</b> The four-stage training chain: experts train independently first (Stage 1) and freeze, then Router+Memory+CDAP train at low modulation strength with temperature annealing (Stage 2), followed by full joint fine-tuning (Stage 3, low LR against catastrophic forgetting). Stage 4 hardening is disabled by default and plays no role in signal validation.</span></figcaption>
+</figure>
+
+<!-- ==================== 页脚 ==================== -->
+<div class="footer">
+  <span>DAFT · Dimension-Aware Financial Trading — Technical Specification v0.3.0</span>
+  <span>Alastair (Dongxu Jiang) · MIT · Inspired by Kimi K3 (Moonshot AI, 2026)</span>
+</div>
+
+</body>
+</html>
