@@ -2,16 +2,11 @@
 import sys, json, time
 sys.path.insert(0, "src")
 from pathlib import Path
-import torch, torch.nn as nn
+import torch
 
 from daft.data.loaders import DataLoader
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert
-from daft.models.router import RegimeRouter
-from daft.models.memory import KDAMarketMemory
-from daft.models.cross_dim_attn import CrossDimensionAttention
-from daft.models.hardening import HardeningEngine
-from daft.models.ensemble import ExpertEnsemble
+from daft.models.factory import build_model
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 
@@ -20,26 +15,9 @@ OUTPUT = Path("outputs")
 device = torch.device("cpu")
 
 # Build model (must match run_full_pipeline architecture)
-experts = nn.ModuleList([
-    TrendExpert(input_dim=200, hidden_dim=64), TrendExpert(input_dim=200, hidden_dim=64),
-    ReversalExpert(input_dim=200, hidden_dim=64), ReversalExpert(input_dim=200, hidden_dim=64),
-    VolatilityExpert(input_dim=200, hidden_dim=48), VolatilityExpert(input_dim=200, hidden_dim=48),
-    EventExpert(input_dim=200, hidden_dim=48), EventExpert(input_dim=200, hidden_dim=48),
-    MomentumExpert(input_dim=200, hidden_dim=64), MomentumExpert(input_dim=200, hidden_dim=64),
-])
-model = ExpertEnsemble(
-    experts,
-    RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3, temperature=0.1, noisy_gating_std=0.0),
-    KDAMarketMemory(d_k=128, d_v=64, d_feature=200, bottleneck_ratio=4, use_route_modulation=True),
-    CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3, joint_dim=64, modulation_strength=1.0),
-    HardeningEngine(n_regimes=10, n_experts=10),
+model, layer_proj = build_model(
+    cdap_strength=1.0, router_temperature=0.1, noisy_gating_std=0.0,
 )
-assert len(experts) == model.router.n_experts == model.cross_dim_attn.n_experts
-layer_proj = nn.ModuleDict({
-    "l0": nn.Sequential(nn.Linear(200, 128), nn.SiLU(), nn.Linear(128, 64), nn.LayerNorm(64)),
-    "l1": nn.Sequential(nn.Linear(200, 128), nn.SiLU(), nn.Linear(128, 64), nn.LayerNorm(64)),
-    "l2": nn.Sequential(nn.Linear(200, 128), nn.SiLU(), nn.Linear(128, 64), nn.LayerNorm(64)),
-})
 
 # Load checkpoints
 JointTrainer.load_checkpoints(model, layer_proj, str(CKPT))

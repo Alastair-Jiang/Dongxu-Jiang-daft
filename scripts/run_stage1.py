@@ -20,7 +20,6 @@ import time
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -31,9 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from daft.data.loaders import DataLoader
 from daft.data.panel import Panel
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
-)
+from daft.models.factory import build_experts
 from daft.training.expert_trainer import Stage1ExpertTrainer
 
 # ---------------------------------------------------------------------------
@@ -70,23 +67,7 @@ def banner(msg: str):
     print(f"{'=' * w}")
 
 
-def build_experts() -> nn.ModuleList:
-    """Create 10 experts: 2 per strategy type."""
-    return nn.ModuleList([
-        TrendExpert(input_dim=200, hidden_dim=64),
-        TrendExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-    ])
-
-
-def count_params(experts: nn.ModuleList) -> int:
+def count_params(experts) -> int:
     return sum(p.numel() for expert in experts for p in expert.parameters())
 
 

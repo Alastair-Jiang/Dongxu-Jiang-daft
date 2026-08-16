@@ -16,19 +16,14 @@
 from __future__ import annotations
 import argparse, json, sys, time
 from pathlib import Path
-import torch, torch.nn as nn
+import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert
-from daft.models.router import RegimeRouter
-from daft.models.memory import KDAMarketMemory
-from daft.models.cross_dim_attn import CrossDimensionAttention
-from daft.models.hardening import HardeningEngine
-from daft.models.ensemble import ExpertEnsemble
+from daft.models.factory import build_model
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
@@ -37,25 +32,11 @@ from daft.utils.experiment import config_hash, next_exp_path
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 
-def build_model():
-    experts = nn.ModuleList([
-        TrendExpert(200,64), TrendExpert(200,64),
-        ReversalExpert(200,64), ReversalExpert(200,64),
-        VolatilityExpert(200,48), VolatilityExpert(200,48),
-        EventExpert(200,48), EventExpert(200,48),
-        MomentumExpert(200,64), MomentumExpert(200,64),
-    ])
-    model = ExpertEnsemble(experts,
-        RegimeRouter(200,16,10,3,temperature=0.1,noisy_gating_std=0.0),
-        KDAMarketMemory(128,64,200,bottleneck_ratio=4,use_route_modulation=True),
-        CrossDimensionAttention(10,128,64,3,64,modulation_strength=1.0),
-        HardeningEngine(10,10))
-    layer_proj = nn.ModuleDict({
-        "l0": nn.Sequential(nn.Linear(200,128),nn.SiLU(),nn.Linear(128,64),nn.LayerNorm(64)),
-        "l1": nn.Sequential(nn.Linear(200,128),nn.SiLU(),nn.Linear(128,64),nn.LayerNorm(64)),
-        "l2": nn.Sequential(nn.Linear(200,128),nn.SiLU(),nn.Linear(128,64),nn.LayerNorm(64)),
-    })
-    return model, layer_proj
+def build_ablation_model():
+    """推理用: 10 专家 + 温度 0.1(与 EXP-20260809-01 产物 checkpoint 对齐)。"""
+    return build_model(
+        cdap_strength=1.0, router_temperature=0.1, noisy_gating_std=0.0,
+    )
 
 
 def ema_smooth(signals: torch.Tensor, lam: float) -> torch.Tensor:
@@ -96,6 +77,7 @@ def main():
     parser.add_argument("--lambdas", default="0,0.3,0.5,0.7")
     parser.add_argument("--start", default="2021-01-01")
     parser.add_argument("--end", default="2025-12-31")
+    parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"])
     args = parser.parse_args()
     lambdas = [float(x) for x in args.lambdas.split(",")]
 
@@ -103,12 +85,13 @@ def main():
     print("=== EXP-20260809-02(v2): 信号平滑对比 (λ 在 val 选) ===")
 
     panel = BaostockAdapter({"start_date":args.start,"end_date":args.end,
-                             "frequency":"d","n_stocks":args.stocks,"adjust":"2"}).load()
+                             "frequency":"d","n_stocks":args.stocks,
+                             "universe":args.universe,"adjust":"2"}).load()
     T, N, F = panel.shape
     t_train_end, t_val_end = int(T*0.6), int(T*0.8)
     print(f"Panel: (T={T}, N={N})  train:[0,{t_train_end}) val:[{t_train_end},{t_val_end}) test:[{t_val_end},{T})")
 
-    model, layer_proj = build_model()
+    model, layer_proj = build_ablation_model()
     ckpt_dir = PROJECT_ROOT/"checkpoints"/"oos"
     if not ckpt_dir.exists():
         raise FileNotFoundError(

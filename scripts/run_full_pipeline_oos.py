@@ -26,21 +26,13 @@ import time
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
-)
-from daft.models.router import RegimeRouter
-from daft.models.memory import KDAMarketMemory
-from daft.models.cross_dim_attn import CrossDimensionAttention
-from daft.models.hardening import HardeningEngine
-from daft.models.ensemble import ExpertEnsemble
+from daft.models.factory import build_experts, build_ensemble, build_layer_proj
 from daft.training.expert_trainer import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
@@ -50,40 +42,6 @@ from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints" / "oos"
-
-
-def build_experts():
-    return nn.ModuleList([
-        TrendExpert(input_dim=200, hidden_dim=64),
-        TrendExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-    ])
-
-
-def build_ensemble(experts, cdap_strength=0.1):
-    router = RegimeRouter(input_dim=200, latent_dim=16, n_experts=10, top_k=3,
-                          temperature=1.0, noisy_gating_std=0.1)
-    memory = KDAMarketMemory(d_k=128, d_v=64, d_feature=200,
-                             bottleneck_ratio=4, use_route_modulation=True)
-    cdap = CrossDimensionAttention(n_experts=10, d_k=128, d_v=64, n_layers=3,
-                                   joint_dim=64, modulation_strength=cdap_strength)
-    hardening = HardeningEngine(n_regimes=8, n_experts=10)
-    return ExpertEnsemble(experts, router, memory, cdap, hardening)
-
-
-def build_layer_proj(d_v=64, input_dim=200):
-    return nn.ModuleDict({
-        "l0": nn.Sequential(nn.Linear(input_dim, 128), nn.SiLU(), nn.Linear(128, d_v), nn.LayerNorm(d_v)),
-        "l1": nn.Sequential(nn.Linear(input_dim, 128), nn.SiLU(), nn.Linear(128, d_v), nn.LayerNorm(d_v)),
-        "l2": nn.Sequential(nn.Linear(input_dim, 128), nn.SiLU(), nn.Linear(128, d_v), nn.LayerNorm(d_v)),
-    })
 
 
 def compute_normalization(panel, extractor):
@@ -136,6 +94,8 @@ def main():
     parser.add_argument("--end", default="2025-12-31")
     parser.add_argument("--full", action="store_true", help="full training config")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"],
+                        help="股票池(默认 hs300 真实成分)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -162,7 +122,8 @@ def main():
     print("\n[1/6] 拉取真实数据 (baostock)...")
     adapter = BaostockAdapter({
         "start_date": args.start, "end_date": args.end,
-        "frequency": "d", "n_stocks": args.stocks, "adjust": "2",
+        "frequency": "d", "n_stocks": args.stocks,
+        "universe": args.universe, "adjust": "2",
     })
     panel = adapter.load()
     T, N, F = panel.shape

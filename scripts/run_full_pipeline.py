@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Dict
 
 import torch
-import torch.nn as nn
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -32,14 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from daft.data.loaders import DataLoader
 from daft.data.panel import Panel
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
-)
-from daft.models.router import RegimeRouter
-from daft.models.memory import KDAMarketMemory
-from daft.models.cross_dim_attn import CrossDimensionAttention
-from daft.models.hardening import HardeningEngine
-from daft.models.ensemble import ExpertEnsemble
+from daft.models.factory import build_experts, build_ensemble, build_layer_proj
 from daft.training.expert_trainer import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
@@ -77,62 +69,9 @@ def banner(msg: str):
     print(f"{'=' * w}")
 
 
-def build_experts() -> nn.ModuleList:
-    return nn.ModuleList([
-        TrendExpert(input_dim=200, hidden_dim=64),
-        TrendExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-    ])
-
-
-def build_ensemble(experts: nn.ModuleList, cdap_strength: float = 0.1) -> ExpertEnsemble:
-    router = RegimeRouter(
-        input_dim=200, latent_dim=16, n_experts=10, top_k=3,
-        temperature=1.0, noisy_gating_std=0.1,
-    )
-    memory = KDAMarketMemory(
-        d_k=128, d_v=64, d_feature=200,
-        bottleneck_ratio=4, use_route_modulation=True,
-    )
-    cdap = CrossDimensionAttention(
-        n_experts=10, d_k=128, d_v=64, n_layers=3,
-        joint_dim=64, modulation_strength=cdap_strength,
-    )
-    hardening = HardeningEngine(n_regimes=10, n_experts=10)
-    assert len(experts) == router.n_experts == cdap.n_experts, (
-        f"n_experts 不一致: experts={len(experts)}, "
-        f"router={router.n_experts}, cdap={cdap.n_experts}"
-    )
-    return ExpertEnsemble(experts, router, memory, cdap, hardening)
-
-
-def build_layer_proj(d_v: int = 64, input_dim: int = 200) -> nn.ModuleDict:
-    return nn.ModuleDict({
-        "l0": nn.Sequential(
-            nn.Linear(input_dim, 128), nn.SiLU(),
-            nn.Linear(128, d_v), nn.LayerNorm(d_v),
-        ),
-        "l1": nn.Sequential(
-            nn.Linear(input_dim, 128), nn.SiLU(),
-            nn.Linear(128, d_v), nn.LayerNorm(d_v),
-        ),
-        "l2": nn.Sequential(
-            nn.Linear(input_dim, 128), nn.SiLU(),
-            nn.Linear(128, d_v), nn.LayerNorm(d_v),
-        ),
-    })
-
-
 def generate_backtest_signals(
-    model: ExpertEnsemble,
-    layer_proj: nn.ModuleDict,
+    model,
+    layer_proj,
     panel: Panel,
     device: torch.device,
 ) -> torch.Tensor:
