@@ -1,5 +1,6 @@
 """Test data pipeline: Panel dataclass and DataLoader."""
 
+import numpy as np
 import pytest
 import torch
 
@@ -156,3 +157,40 @@ class TestDataLoader:
         assert panel.metadata is not None
         assert "regime_ids" in panel.metadata
         assert panel.metadata["regime_ids"].shape == (10,)
+
+
+# ── 涨跌停 mask (2026-08-16 新增) ───────────────────────────────────────
+
+class TestLimitMoveMask:
+    """A 股涨跌停日应被标记为不可成交。"""
+
+    def _mask(self, closes, ticker):
+        from daft.data.adapters.baostock_adapter import _limit_move_mask
+        return _limit_move_mask(np.array(closes, dtype=np.float32), ticker)
+
+    def test_main_board_10pct(self):
+        # 主板: 第 2 天 +10% → 涨停不可成交; 第 3 天 +5% 正常
+        m = self._mask([10.0, 10.0, 11.0, 11.55, 11.55], "sh.600519")
+        assert m.tolist() == [True, True, False, True, True]
+
+    def test_gem_board_20pct(self):
+        # 创业板: +10% 不触板, +20% 触板
+        m = self._mask([10.0, 11.0, 13.2, 13.2], "sz.300750")
+        assert m.tolist() == [True, True, False, True]
+
+    def test_star_board_20pct(self):
+        m = self._mask([10.0, 11.0, 13.2, 13.2], "sh.688001")
+        assert m.tolist() == [True, True, False, True]
+
+    def test_first_day_always_true(self):
+        m = self._mask([10.0, 11.0], "sh.600000")
+        assert m[0] == True  # 首日无前收盘
+
+    def test_nan_prev_close_not_limit(self):
+        m = self._mask([float("nan"), 10.0, 11.0], "sh.600000")
+        # prev NaN 的日子由 NaN mask 处理, 涨跌停判定保持 True
+        assert m.tolist() == [True, True, False]
+
+    def test_limit_down_also_masked(self):
+        m = self._mask([10.0, 10.0, 9.0, 9.0], "sh.600000")
+        assert m.tolist() == [True, True, False, True]

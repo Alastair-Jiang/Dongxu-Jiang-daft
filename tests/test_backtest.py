@@ -187,6 +187,113 @@ class TestMaskedShortRegression:
         assert result["turnover"] == pytest.approx(0.6, abs=1e-5)
 
 
+# ── 2026-08-16 交易制度约束: 停牌/涨跌停禁止开平仓 + 分数仓位 ─────────
+
+class TestNoTradeOnMaskedDays:
+    def test_masked_asset_keeps_position_no_cost(self):
+        """停牌日(mask=False)不能平仓: 已持仓的停牌资产维持昨收、不计换手成本。
+
+        场景: t0 建仓 {B}(换手 1.0); t1 A 停牌, 目标换成 {C} —
+        B 可卖、C 可买, 换手 = 卖 B 1.0 + 买 C 1.0 = 2.0。
+        若 B 停牌(见下个用例), 则 B 卖不掉。
+        """
+        engine = BacktestEngine({
+            "transaction_cost_bps": 100, "slippage_bps": 0,
+            "top_quantile": 0.5, "long_only": True,
+            "respect_mask_no_trade": True,
+        })
+        # t0 持仓 {B}; t1 目标 {C}(B 正常可卖)
+        signals = torch.tensor([
+            [0.1, 3.0, 2.0],
+            [3.0, 0.5, 5.0],
+            [3.0, 0.5, 5.0],
+        ])
+        prices = torch.full((3, 3), 10.0)
+        mask = torch.tensor([
+            [True, True, True],
+            [True, True, True],
+            [True, True, True],
+        ])
+        result = engine.run(signals, prices, mask)
+        # T_ret=2: t0 建仓 {B} 换手 1.0; t1 换仓 {C} 换手 2.0 → 均值 1.5
+        assert result["turnover"] == pytest.approx(1.5, abs=1e-5)
+
+    def test_masked_held_asset_cannot_be_sold(self):
+        """已持仓资产在其停牌日卖不掉: 持仓维持昨收, 该部分不计换手。
+
+        注: 每日调仓(freq=1)下 ret_mask 会提前一天把即将停牌的资产排除
+        出目标, 该约束结构性不触发; 本用例用 rebalance_freq=2 让持仓
+        跨过停牌日, 从而真正触发"停牌卖不掉"。
+        """
+        engine = BacktestEngine({
+            "transaction_cost_bps": 100, "slippage_bps": 0,
+            "top_quantile": 0.5, "long_only": True,
+            "respect_mask_no_trade": True,
+            "rebalance_freq": 2,
+        })
+        # t0 调仓建仓 {B}(换手 1.0); t1 持有; t2 调仓目标 {A}, 但 B 当日
+        # 停牌卖不掉 → w=[1,1,0]: 只买 A, 换手 1.0。总换手 2.0 → 均值 2/3。
+        # (无约束时 t2 换手 = 买 A + 卖 B = 2.0 → 总 3.0 → 均值 1.0。)
+        signals = torch.tensor([
+            [0.1, 3.0, 2.0],
+            [3.0, 0.5, 5.0],
+            [3.0, 0.5, 5.0],
+            [3.0, 0.5, 5.0],
+        ])
+        prices = torch.full((4, 3), 10.0)
+        mask = torch.tensor([
+            [True, True, True],
+            [True, True, True],
+            [True, False, True],   # day2: B 停牌(跌停卖不掉)
+            [True, True, True],
+        ])
+        result = engine.run(signals, prices, mask)
+        assert result["turnover"] == pytest.approx(2.0 / 3.0, abs=1e-5)
+
+    def test_masked_asset_never_shorted_with_no_trade(self):
+        """respect_mask_no_trade 与 masked 做空修复互不冲突。"""
+        engine = BacktestEngine({
+            "transaction_cost_bps": 0, "slippage_bps": 0,
+            "top_quantile": 0.2, "long_only": False,
+            "respect_mask_no_trade": True,
+        })
+        sig = torch.tensor([[1.0, 0.5, 0.0, -0.5, -0.8]])
+        prices = torch.full((2, 5), 10.0)
+        mask = torch.tensor([[True, True, True, True, False]])
+        pos = engine._signals_to_positions(sig, mask, torch.device("cpu"))
+        assert pos[0, 4] == 0.0
+
+
+class TestSignalZscoreWeights:
+    def test_zscore_weights_positive_and_sum_one(self):
+        engine = BacktestEngine({
+            "top_quantile": 0.5, "long_only": True,
+            "weight_mode": "signal_zscore",
+        })
+        signals = torch.tensor([[4.0, 3.0, 1.0, 0.0]])
+        mask = torch.ones(1, 4, dtype=torch.bool)
+        pos = engine._signals_to_positions(signals, mask, torch.device("cpu"))
+        w = pos[0]
+        selected = w[w > 0]
+        assert torch.allclose(selected.sum(), torch.tensor(1.0), atol=1e-5)
+        assert (w >= 0).all()
+        # 信号更强的资产权重更大
+        assert w[0] > w[1] > 0
+        assert w[2] == 0.0 and w[3] == 0.0
+
+    def test_zscore_long_short_sums_to_zero(self):
+        engine = BacktestEngine({
+            "top_quantile": 0.5, "long_only": False,
+            "weight_mode": "signal_zscore",
+        })
+        signals = torch.tensor([[4.0, 3.0, 1.0, 0.0]])
+        mask = torch.ones(1, 4, dtype=torch.bool)
+        pos = engine._signals_to_positions(signals, mask, torch.device("cpu"))
+        assert torch.allclose(pos[0].sum(), torch.tensor(0.0), atol=1e-5)
+        assert pos[0][:2].sum() > 0.99  # 多头合计 ≈ +1
+        assert pos[0][2:].sum() < -0.99  # 空头合计 ≈ −1
+
+
 # ── Info Coefficient ───────────────────────────────────────────────────
 
 class TestInfoCoefficient:

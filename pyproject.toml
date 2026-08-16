@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "daft"
-version = "0.1.0"
+version = "0.3.0"
 description = "Dimension-Aware Financial Trading: cross-dimensional attention architecture for medium-frequency quantitative trading"
 readme = "README.md"
 license = {text = "MIT"}
@@ -32,6 +32,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Office/Business :: Financial :: Investment",
 ]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -41,6 +45,8 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0",
     "pre-commit>=3.0",
+    "numpy>=1.24",           # 测试与数据适配器需要(CI 上 torch 不再自带)
+    "pandas>=2.0",           # baostock/yfinance 适配器需要
 ]
 gpu = [
     "torch>=2.0,!=2.0.1",     # CUDA-enabled

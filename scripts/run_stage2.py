@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -27,14 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from daft.data.loaders import DataLoader
-from daft.models.experts import (
-    TrendExpert, ReversalExpert, VolatilityExpert, EventExpert, MomentumExpert,
-)
-from daft.models.router import RegimeRouter
-from daft.models.memory import KDAMarketMemory
-from daft.models.cross_dim_attn import CrossDimensionAttention
-from daft.models.hardening import HardeningEngine
-from daft.models.ensemble import ExpertEnsemble
+from daft.models.factory import build_experts, build_ensemble
 from daft.training.router_trainer import RouterTrainer
 from daft.training.expert_trainer import Stage1ExpertTrainer
 
@@ -75,49 +67,6 @@ def banner(msg: str):
     print(f"{'=' * w}")
 
 
-def build_experts() -> nn.ModuleList:
-    """Create 8 experts matching Stage 1 architecture."""
-    return nn.ModuleList([
-        TrendExpert(input_dim=200, hidden_dim=64),
-        TrendExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        ReversalExpert(input_dim=200, hidden_dim=64),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        VolatilityExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        EventExpert(input_dim=200, hidden_dim=48),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-        MomentumExpert(input_dim=200, hidden_dim=64),
-    ])
-
-
-def build_ensemble(experts: nn.ModuleList, device: torch.device) -> ExpertEnsemble:
-    """Assemble the full DAFT model around pre-built experts."""
-    router = RegimeRouter(
-        input_dim=200, latent_dim=16, n_experts=10, top_k=3,
-        temperature=1.0, noisy_gating_std=0.1,
-    )
-    memory = KDAMarketMemory(
-        d_k=128, d_v=64, d_feature=200,
-        bottleneck_ratio=4, use_route_modulation=True,
-    )
-    cdap = CrossDimensionAttention(
-        n_experts=10, d_k=128, d_v=64, n_layers=3,
-        joint_dim=64, modulation_strength=0.1,
-    )
-    hardening = HardeningEngine(
-        n_regimes=10, n_experts=10, threshold=100,
-        min_confidence=0.95, entropy_multiplier=2.0,
-    )
-    # 通道一致性守卫: 专家池与路由/CDAP 的专家数必须一致
-    # (2026-08-16 修复 n_experts 8 vs 10 混用导致的 forward 崩溃)
-    assert len(experts) == router.n_experts == cdap.n_experts, (
-        f"n_experts 不一致: experts={len(experts)}, "
-        f"router={router.n_experts}, cdap={cdap.n_experts}"
-    )
-    return ExpertEnsemble(experts, router, memory, cdap, hardening)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -156,7 +105,7 @@ def main():
 
     # --------------- Step 2: Build ensemble ---------------
     banner("Step 2: Build DAFT Ensemble")
-    model = build_ensemble(experts, device)
+    model = build_ensemble(experts)
     total_params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.router.parameters()) + \
                 sum(p.numel() for p in model.memory.parameters()) + \

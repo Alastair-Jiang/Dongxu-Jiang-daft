@@ -5,7 +5,7 @@ A cross-dimensional attention architecture for medium-frequency quantitative
 trading, inspired by Kimi K3's Stable LatentMoE, KDA, and AttnRes.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __author__ = "Alastair(Dongxu-Jiang)"
 __license__ = "MIT"
 
