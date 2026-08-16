@@ -45,6 +45,9 @@ def main():
     parser.add_argument("--end", default="2025-12-31")
     parser.add_argument("--lam", type=float, default=1.0)
     parser.add_argument("--train-frac", type=float, default=0.8)
+    parser.add_argument("--universe", default="hs300",
+                        choices=["hs300", "sample"],
+                        help="股票池: hs300=按 start 日拉取真实沪深300 成分(默认); sample=内置静态清单")
     args = parser.parse_args()
 
     t0 = time.time()
@@ -57,6 +60,7 @@ def main():
         "end_date": args.end,
         "frequency": "d",
         "n_stocks": args.stocks,
+        "universe": args.universe,
         "adjust": "2",           # 2 = 前复权
     })
     panel = adapter.load()
