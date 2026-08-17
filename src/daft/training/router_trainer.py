@@ -40,10 +40,11 @@ class RouterTrainer:
     device : torch.device
     """
 
-    def __init__(self, model, config: dict, device: torch.device):
+    def __init__(self, model, config: dict, device: torch.device, lookback_scale: float = 1.0):
         self.model = model
         self.config = config
         self.device = device
+        self.lookback_scale = lookback_scale
 
         # Layer hierarchy projectors: s_t (200) → 3 × d_v (64)
         # These are trainable — they learn to organize features into a
@@ -90,8 +91,7 @@ class RouterTrainer:
         patience = cfg.get("early_stop_patience", 8)
         balance_every = cfg.get("balance_every", 50)
         grad_clip_norm = cfg.get("grad_clip_norm", 1.0)
-        entropy_weight = cfg.get("entropy_weight", 0.01)  # small entropy bonus
-        sparsity_weight = cfg.get("sparsity_weight", 0.01)  # per-sample sparsity (0.05 过强致坍缩, 降为 0.01)
+        balance_weight = cfg.get("balance_weight", 0.01)  # 真负载均衡 KL (方案 A, 2026-08-17)
 
         # --- Freeze experts ---
         for expert in self.model.experts:
@@ -141,7 +141,7 @@ class RouterTrainer:
 
         for epoch in range(epochs):
             # ---- Temperature annealing: 1.0 → 0.1 ----
-            temp = 1.0 - 0.9 * (epoch / max(epochs - 1, 1))
+            temp = 1.0 - 0.5 * (epoch / max(epochs - 1, 1))  # 退火 1.0→0.5 (方案 A: 0.1 过度锐化致熵≈0)
             self.model.router.temperature = temp
 
             # ---- Train ----
@@ -151,8 +151,7 @@ class RouterTrainer:
                 train_loader, optimizer, True,
                 balance_every=balance_every,
                 grad_clip_norm=grad_clip_norm,
-                entropy_weight=entropy_weight,
-                sparsity_weight=sparsity_weight,
+                balance_weight=balance_weight,
             )
 
             # ---- Validate ----
@@ -222,7 +221,9 @@ class RouterTrainer:
         Returns (s_2d, t_1d, m_1d, t_idx): 展平样本 + 每个样本的原始
         时间步索引(用于逐时步截面 IC, 2026-08-16 修复)。
         """
-        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+        extractor = RegimeFeatureExtractor(
+            n_base_factors=50, output_dim=200, lookback_scale=self.lookback_scale
+        )
         with torch.no_grad():
             s_t_raw = extractor(panel)                     # (T, N, 200)
 
@@ -266,8 +267,7 @@ class RouterTrainer:
         training: bool,
         balance_every: int = 50,
         grad_clip_norm: float = 1.0,
-        entropy_weight: float = 0.01,
-        sparsity_weight: float = 0.01,
+        balance_weight: float = 0.01,
         return_predictions: bool = False,
     ):
         """Run one epoch, optionally training.
@@ -339,24 +339,23 @@ class RouterTrainer:
                     for i in range(self.model.n_experts)
                 )
 
-                # --- Per-sample sparsity (Kimi K3 评审 2026-08-09) ---
-                # 路由器熵 ≈1.05(接近均匀)的根因: 只靠 batch 级目标 + 弱熵正则。
-                # 修复: 对每个样本的 top-k 分布施加"锐化"惩罚 ——
-                # 鼓励 p 接近 one-hot(在 top-k 内), 而不是均匀 1/3。
-                # 具体: 最小化每个样本路由分布的熵(与整体熵正则区分开,
-                # 整体熵正则防坍缩, 样本熵惩罚防均匀混合)。
-                per_sample_entropy = -(routing_probs * (routing_probs + 1e-8).log()
-                                      ).sum(dim=-1)          # (B,)
-                sparsity_penalty = per_sample_entropy.mean()  # 标量: 样本熵均值
+                # --- 真负载均衡 KL（方案 A, 2026-08-17）---
+                # 根因修复: 原 -entropy_weight*H 与 +sparsity_weight*H 是同一个
+                # batch 平均熵 H, 权重相等(0.01)时精确抵消为 0, 熵正则失效。
+                # 改为 Switch Transformer 风格的负载均衡损失 —— 基于专家使用
+                # 频率 current_frac 的 KL(uniform || current_frac), 鼓励每个专家
+                # 都被用到(防坍缩到单一专家), 不再有 per-sample 熵惩罚(防过度 one-hot)。
+                n_experts = self.model.n_experts
+                current_frac = routing_probs.mean(dim=0)          # (n_experts,)
+                current_frac = current_frac.clamp(min=1e-8)
+                target_frac = 1.0 / n_experts
+                balance_loss = (target_frac * (target_frac / current_frac).log()).sum()
 
-                # --- Entropy bonus (prevent router collapse) ---
-                # H = -Σ p·log(p), maximize → subtract from loss
+                # 路由熵仅作监控指标(不参与损失), 用于验证 0.5~1.5 区间
                 routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
                                     ).sum(dim=-1).mean()
-                # 总损失: 加权专家损失 - 整体熵正则(防坍缩) + 样本稀疏惩罚(防均匀)
-                loss = (weighted_loss
-                        - entropy_weight * routing_entropy
-                        + sparsity_weight * sparsity_penalty)
+
+                loss = weighted_loss + balance_weight * balance_loss
 
                 optimizer.zero_grad()
                 loss.backward()

@@ -44,11 +44,13 @@ class JointTrainer:
         layer_proj: nn.ModuleDict,
         config: dict,
         device: torch.device,
+        lookback_scale: float = 1.0,
     ):
         self.model = model
         self.layer_proj = layer_proj
         self.config = config
         self.device = device
+        self.lookback_scale = lookback_scale
 
     # ------------------------------------------------------------------
     def train(self, train_panel: Panel, val_panel: Panel) -> dict:
@@ -197,7 +199,9 @@ class JointTrainer:
     # ------------------------------------------------------------------
     def _build_dataset(self, panel: Panel):
         """Build s_t, targets, mask from panel."""
-        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+        extractor = RegimeFeatureExtractor(
+            n_base_factors=50, output_dim=200, lookback_scale=self.lookback_scale
+        )
         with torch.no_grad():
             s_t_raw = extractor(panel)
 

@@ -68,14 +68,18 @@ class Stage1ExpertTrainer:
         panel: Panel,
         config: Optional[Dict] = None,
         device: Optional[torch.device] = None,
+        lookback_scale: float = 1.0,
     ):
         self.experts = experts
         self.panel = panel
         self.config = config or {}
         self.device = device or torch.device("cpu")
+        self.lookback_scale = lookback_scale
 
         # --- Build s_t: market state vectors via RegimeFeatureExtractor ---
-        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+        extractor = RegimeFeatureExtractor(
+            n_base_factors=50, output_dim=200, lookback_scale=self.lookback_scale
+        )
         with torch.no_grad():
             s_t_raw = extractor(panel)                     # (T, N, 200)
 
