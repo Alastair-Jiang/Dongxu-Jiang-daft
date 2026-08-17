@@ -26,6 +26,7 @@
 | MaxDD 百分比 | engine.py | `equity = torch.exp(cumret)` |
 | 涨跌停 mask | baostock_adapter.py | `_limit_move_mask` |
 | 通道契约 | base_features.py | `ensure_base_panel` |
+| 标准化 train-only(A2) | router/joint_trainer.py | val 段 `norm_stats=self.norm_stats` 复用训练段统计量 |
 
 ## 二、人工检查（脚本覆盖不到的部分）
 

@@ -51,6 +51,10 @@ class JointTrainer:
         self.config = config
         self.device = device
         self.lookback_scale = lookback_scale
+        # A2 修复 (2026-08-18): 标准化统计量 (mean, std) 只在训练段拟合一次,
+        # val/推理共用同一份 —— 修复 val 段自算统计量与 OOS 推理(train-only)
+        # 分布不一致的问题(早停/选型依据失真)。
+        self.norm_stats = None
 
     # ------------------------------------------------------------------
     def train(self, train_panel: Panel, val_panel: Panel) -> dict:
@@ -81,8 +85,12 @@ class JointTrainer:
         self.model.router.temperature = 0.1   # near-discrete routing at inference temp
 
         # --- Build s_t and targets ---
+        # A2 (2026-08-18): 训练段拟合统计量并记录, val 段强制复用
+        # (与 OOS 推理的 train-only 标准化同口径)
         train_s, train_t, train_m, train_tidx = self._build_dataset(train_panel)
-        val_s, val_t, val_m, val_tidx = self._build_dataset(val_panel)
+        val_s, val_t, val_m, val_tidx = self._build_dataset(
+            val_panel, norm_stats=self.norm_stats
+        )
 
         # --- Move to device ---
         self.layer_proj.to(self.device)
@@ -197,8 +205,14 @@ class JointTrainer:
         return history
 
     # ------------------------------------------------------------------
-    def _build_dataset(self, panel: Panel):
-        """Build s_t, targets, mask from panel."""
+    def _build_dataset(self, panel: Panel, norm_stats=None):
+        """Build s_t, targets, mask from panel.
+
+        norm_stats : (mean, std) 或 None (A2 修复, 2026-08-18)
+            None → 从当前段拟合并记录到 self.norm_stats(训练段用法);
+            给定 → 复用该统计量且**不**覆盖 self.norm_stats(val 段用法,
+            与 OOS 推理的 train-only 标准化同口径)。
+        """
         extractor = RegimeFeatureExtractor(
             n_base_factors=50, output_dim=200, lookback_scale=self.lookback_scale
         )
@@ -207,9 +221,14 @@ class JointTrainer:
 
         s_t_raw = torch.nan_to_num(s_t_raw, nan=0.0, posinf=1e6, neginf=-1e6)
         s_t_raw = s_t_raw.clamp(-1e6, 1e6)
-        s_flat = s_t_raw.reshape(-1, 200)
-        s_mean = s_flat.mean(dim=0, keepdim=True)
-        s_std = s_flat.std(dim=0, keepdim=True).clamp(min=1e-4)
+        # A2: 统计量来源可注入; 默认本段拟合
+        if norm_stats is None:
+            s_flat = s_t_raw.reshape(-1, 200)
+            s_mean = s_flat.mean(dim=0, keepdim=True)
+            s_std = s_flat.std(dim=0, keepdim=True).clamp(min=1e-4)
+            self.norm_stats = (s_mean, s_std)
+        else:
+            s_mean, s_std = norm_stats
         s_t = ((s_t_raw - s_mean) / s_std).clamp(-10.0, 10.0)
 
         close = panel.values[..., 3]

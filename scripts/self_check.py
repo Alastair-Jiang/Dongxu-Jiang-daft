@@ -100,6 +100,8 @@ checks_src = [
     ("MaxDD 百分比", "engine.py", r"equity = torch\.exp", True),
     ("涨跌停 mask", "baostock_adapter.py", r"_limit_move_mask", True),
     ("通道契约", "base_features.py", r"def ensure_base_panel", True),
+    ("标准化 train-only(A2)", "router_trainer.py", r"norm_stats=self\.norm_stats", True),
+    ("标准化 train-only(A2)", "joint_trainer.py", r"norm_stats=self\.norm_stats", True),
 ]
 for name, fname, pattern, expect in checks_src:
     text = src_text.get(fname, "")
