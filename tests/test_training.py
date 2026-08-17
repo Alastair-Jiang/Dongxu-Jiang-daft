@@ -7,6 +7,7 @@ import torch.nn as nn
 from daft.training import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
+from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.experts import TrendExpert, ReversalExpert
 from daft.data.panel import Panel
 
@@ -127,3 +128,67 @@ class TestTrainingConfig:
         }, torch.device("cpu"))
         assert trainer.config["modulation_strength"] == 1.0
         assert trainer.config["lr"] < 0.001
+
+
+# ── A2: 标准化统计量 train-only 一致性 (2026-08-18) ─────────────────────────
+
+class TestNormStatsConsistency:
+    """K3 纲领 A2: Stage2/3 的 val 段必须复用训练段标准化统计量。
+
+    修复前: `_build_dataset` 对 train/val 各自拟合 mean/std，早停与选型
+    依据的 val-IC 分布 ≠ 推理时(train-only 统计)的分布。
+    修复后: 训练段拟合并记录 `self.norm_stats`，val 段强制注入复用。
+    """
+
+    @staticmethod
+    def _make_layer_proj():
+        return nn.ModuleDict({
+            "l0": nn.Linear(200, 64),
+            "l1": nn.Linear(200, 64),
+            "l2": nn.Linear(200, 64),
+        })
+
+    def test_router_trainer_records_stats_on_train_build(self, ensemble):
+        trainer = RouterTrainer(ensemble, {"epochs": 1}, torch.device("cpu"))
+        assert trainer.norm_stats is None
+        trainer._build_dataset(make_synthetic_panel(T=60, N=6))
+        assert trainer.norm_stats is not None
+        mean, std = trainer.norm_stats
+        assert mean.shape == (1, 200)
+        assert std.shape == (1, 200)
+        assert (std >= 1e-4).all()
+
+    def test_router_trainer_val_does_not_refit(self, ensemble):
+        trainer = RouterTrainer(ensemble, {"epochs": 1}, torch.device("cpu"))
+        trainer._build_dataset(make_synthetic_panel(T=60, N=6))
+        stats_train = trainer.norm_stats
+        # val 段注入复用 → 不得覆盖已记录的训练段统计量
+        trainer._build_dataset(make_synthetic_panel(T=40, N=6), norm_stats=stats_train)
+        assert trainer.norm_stats is stats_train
+
+    def test_injected_stats_are_actually_applied(self, ensemble):
+        """精确复算: 注入统计量后输出 == 手工用该统计量归一化的特征。"""
+        trainer = RouterTrainer(ensemble, {"epochs": 1}, torch.device("cpu"))
+        trainer._build_dataset(make_synthetic_panel(T=60, N=6))
+        mean, std = trainer.norm_stats
+
+        panel_b = make_synthetic_panel(T=40, N=6)
+        s_b, _, _, _ = trainer._build_dataset(panel_b, norm_stats=(mean, std))
+
+        with torch.no_grad():
+            raw = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)(panel_b)
+        raw = raw[:-1]  # 与 _build_dataset 一致: s_t[:-1] 对齐 targets
+        raw = torch.nan_to_num(raw, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)
+        expect = ((raw - mean) / std).clamp(-10.0, 10.0).reshape(-1, 200)
+        mask_b = panel_b.mask[:-1].reshape(-1)
+        assert torch.allclose(s_b, expect[mask_b], atol=1e-5)
+
+    def test_joint_trainer_records_and_reuses(self, ensemble):
+        trainer = JointTrainer(ensemble, self._make_layer_proj(),
+                               {"epochs": 1}, torch.device("cpu"))
+        assert trainer.norm_stats is None
+        trainer._build_dataset(make_synthetic_panel(T=60, N=6))
+        assert trainer.norm_stats is not None
+        before = trainer.norm_stats
+        trainer._build_dataset(make_synthetic_panel(T=40, N=6), norm_stats=before)
+        assert trainer.norm_stats is before

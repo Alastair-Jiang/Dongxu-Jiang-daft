@@ -1,5 +1,21 @@
 # DAFT 更新日志
 
+## 未发布 — K3 纲领正确性修复批次（进行中）
+
+### A2 — Stage 2/3 标准化统计量 train-only 贯穿（2026-08-18）
+
+- **问题**: `RouterTrainer` / `JointTrainer` 的 `_build_dataset` 对
+  train / val 段各自拟合 mean/std，早停与选型依据的 val-IC 分布 ≠
+  OOS 推理（train-only 统计）的分布（K3 纲领 `docs/K3_GUIDANCE_2026-08-18.md` A2）。
+- **修复**: 统计量只在训练段拟合一次并记录 `trainer.norm_stats`；
+  val 段经 `norm_stats=` 参数强制复用；返回签名不变（4 元组，
+  `dml_smoke.py` 等外部调用兼容）。
+- **守卫**: `tests/test_training.py::TestNormStatsConsistency`（含注入统计量
+  精确复算测试）+ `self_check.py` 公式抽查新增 2 项断言。
+- **影响面**: 仅训练期 val 口径，不动模型结构与 OOS 推理逻辑；
+  既有实验结论（NO-GO 判定）不受影响，但其 Stage2/3 早停路径的
+  val-IC 数值口径与修复后不可直接比较。
+
 ## v0.1.0 — 工程修复 + 全面升级 (2026-08-16)（旧规则:v0.3.0 代码义）
 
 ### 修复批次(PR #9, 10 提交 squashed)
