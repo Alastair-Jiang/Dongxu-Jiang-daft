@@ -100,6 +100,8 @@ def main():
     parser.add_argument("--ablate", default="none",
                         choices=["none", "cdap", "memory", "router"],
                         help="消融开关(研究项目): 关闭 CDAP/记忆/路由")
+    parser.add_argument("--ckpt-dir", default="checkpoints/oos",
+                        help="checkpoint 目录(默认 checkpoints/oos)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -175,9 +177,10 @@ def main():
     print(f"      Stage 3 耗时: {time.time()-t0:.1f}s")
 
     # Save checkpoints
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    s3.save_checkpoints(str(CHECKPOINT_DIR))
-    print(f"      Checkpoints → {CHECKPOINT_DIR}")
+    ckpt_dir = Path(args.ckpt_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    s3.save_checkpoints(str(ckpt_dir))
+    print(f"      Checkpoints → {ckpt_dir}")
 
     # ---------- 5. OOS signals: normalization from TRAIN only ----------
     print("\n[5/6] 样本外信号生成 (标准化统计量仅来自 train 段)...")

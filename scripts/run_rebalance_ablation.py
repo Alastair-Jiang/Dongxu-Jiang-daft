@@ -26,13 +26,15 @@ from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary
 from daft.utils.experiment import config_hash, next_exp_path
+from daft.utils.device import get_device
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 
-def build_ablation_model():
+def build_ablation_model(ablate="none"):
     return build_model(
         cdap_strength=1.0, router_temperature=0.1, noisy_gating_std=0.0,
+        ablate=ablate,
     )
 
 
@@ -72,13 +74,18 @@ def main():
     parser.add_argument("--start", default="2021-01-01")
     parser.add_argument("--end", default="2025-12-31")
     parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"])
+    parser.add_argument("--ckpt-dir", default="checkpoints/oos",
+                        help="checkpoint 目录")
+    parser.add_argument("--ablate", default="none",
+                        choices=["none", "cdap", "memory", "router"])
     args = parser.parse_args()
     freqs = [int(x) for x in args.freqs.split(",")]
     lambdas = [float(x) for x in args.lambdas.split(",")]
     weight_modes = [w for w in args.weight_modes.split(",")]
+    device = get_device()
 
     t0 = time.time()
-    print("=== EXP-20260816-08: 调仓频率 × 平滑 消融 (参数 val 选) ===")
+    print(f"=== 调仓频率×平滑消融 (device={device}) ===")
 
     panel = BaostockAdapter({"start_date": args.start, "end_date": args.end,
                              "frequency": "d", "n_stocks": args.stocks,
@@ -87,13 +94,15 @@ def main():
     t_train_end, t_val_end = int(T * 0.6), int(T * 0.8)
     print(f"Panel: (T={T}, N={N})  train:[0,{t_train_end}) val:[{t_train_end},{t_val_end}) test:[{t_val_end},{T})")
 
-    model, layer_proj = build_ablation_model()
-    ckpt_dir = PROJECT_ROOT / "checkpoints" / "oos"
+    model, layer_proj = build_ablation_model(ablate=args.ablate)
+    ckpt_dir = Path(args.ckpt_dir)
     if not ckpt_dir.exists():
-        raise FileNotFoundError(f"{ckpt_dir} 不存在 — 先跑 run_full_pipeline_oos.py")
+        raise FileNotFoundError(f"{ckpt_dir} 不存在 — 先跑 run_full_pipeline_oos.py --ckpt-dir ...")
     JointTrainer.load_checkpoints(model, layer_proj, str(ckpt_dir))
+    model = model.to(device)
+    layer_proj = layer_proj.to(device)
     model.eval(); layer_proj.eval()
-    print("Checkpoints 已加载")
+    print(f"Checkpoints 已加载 ({ckpt_dir}, ablate={args.ablate}, device={device})")
 
     # 标准化(仅 train)
     ext = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
@@ -110,7 +119,6 @@ def main():
     s_all = torch.nan_to_num(s_all, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)
     s_all = ((s_all - mu) / sd).clamp(-10.0, 10.0)
 
-    device = torch.device("cpu")
     model.memory.reset_state(1, device)
     signals = torch.zeros(T - 1, N)
     with torch.no_grad():
