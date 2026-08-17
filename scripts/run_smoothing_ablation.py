@@ -167,6 +167,7 @@ def main():
         "experiment": "EXP-20260809-02-v2",
         "alignment": "k→k+1",
         "lambda_selection": "val 段净 Sharpe 最优 (test 仅报告)",
+        "ckpt_dir": str(ckpt_dir),
         "stocks": N, "lambdas": lambdas, "lambda_star": lam_star,
         "engine_cfg": engine_cfg,
         "config_hash": config_hash({"stocks": N, "lambdas": lambdas, **engine_cfg}),

@@ -165,6 +165,8 @@ def main():
         "experiment": "EXP-20260816-08",
         "alignment": "k→k+1",
         "selection": "val 段净 Sharpe 最优(test 仅报告)",
+        "ckpt_dir": str(ckpt_dir),
+        "ablate": args.ablate,
         "stocks": N, "freqs": freqs, "lambdas": lambdas,
         "weight_modes": weight_modes,
         "best": {"freq": best["freq"], "lambda": best["lambda"],

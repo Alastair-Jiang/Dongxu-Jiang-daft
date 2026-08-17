@@ -119,6 +119,7 @@ def main():
     parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"])
     parser.add_argument("--start", default="2021-01-01")
     parser.add_argument("--end", default="2025-12-31")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     t0 = time.time()
@@ -139,7 +140,7 @@ def main():
     folds = []
     for i, (tr_end, te_start, te_end) in enumerate([(t1, t1, t2), (t2, t2, T)], 1):
         print(f"\n──── 折 {i} ────")
-        r = run_fold(panel, tr_end, te_start, te_end, cfg)
+        r = run_fold(panel, tr_end, te_start, te_end, cfg, seed=args.seed)
         folds.append({"fold": i, **r})
         print(f"  折{i}: test {r['test_days']} 天 → IC={r['ic']:+.4f} t={r['ic_t']:+.2f} "
               f"Sharpe={r['sharpe']:+.4f} 换手={r['turnover']:.3f}")
@@ -148,6 +149,7 @@ def main():
     sharpes = [f["sharpe"] for f in folds]
     report = {
         "experiment": "EXP-20260816-09",
+        "seed": args.seed,
         "stocks": N, "folds": folds,
         "summary": {
             "ic_mean": sum(ics) / len(ics),
