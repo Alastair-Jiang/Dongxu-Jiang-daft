@@ -97,6 +97,9 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"],
                         help="股票池(默认 hs300 真实成分)")
+    parser.add_argument("--ablate", default="none",
+                        choices=["none", "cdap", "memory", "router"],
+                        help="消融开关(研究项目): 关闭 CDAP/记忆/路由")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -156,7 +159,7 @@ def main():
 
     # ---------- 4. Stage 2 + 3 (train + val only) ----------
     print("\n[4/6] Stage 2 + 3: 路由/记忆/CDAP + 联合微调 (仅 train+val 段)...")
-    model = build_ensemble(experts, cdap_strength=0.1)
+    model = build_ensemble(experts, cdap_strength=0.1, ablate=args.ablate)
     layer_proj = build_layer_proj()
 
     s2 = RouterTrainer(model=model, config=cfg["stage2"], device=device)
@@ -228,6 +231,7 @@ def main():
     report = {
         "experiment_id": None,  # 下方写入
         "model": "DAFT_full_pipeline",
+        "ablate": args.ablate,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,

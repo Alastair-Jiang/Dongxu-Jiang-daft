@@ -63,8 +63,12 @@ def build_ensemble(
     cdap_strength: float = 0.1,
     router_temperature: float = 1.0,
     noisy_gating_std: float = 0.1,
+    ablate: str = "none",
 ) -> ExpertEnsemble:
-    """组装标准 DAFT 模型(含 n_experts 一致性守卫)。"""
+    """组装标准 DAFT 模型(含 n_experts 一致性守卫)。
+
+    ablate: none | cdap | memory | router — 消融开关(2026-08-17 研究项目)。
+    """
     router = RegimeRouter(
         input_dim=INPUT_DIM, latent_dim=LATENT_DIM, n_experts=N_EXPERTS,
         top_k=TOP_K, temperature=router_temperature,
@@ -83,13 +87,14 @@ def build_ensemble(
         f"n_experts 不一致: experts={len(experts)}, "
         f"router={router.n_experts}, cdap={cdap.n_experts}"
     )
-    return ExpertEnsemble(experts, router, memory, cdap, hardening)
+    return ExpertEnsemble(experts, router, memory, cdap, hardening, ablate=ablate)
 
 
 def build_model(
     cdap_strength: float = 0.1,
     router_temperature: float = 1.0,
     noisy_gating_std: float = 0.1,
+    ablate: str = "none",
 ):
     """一键: experts + ensemble + layer_proj。"""
     experts = build_experts()
@@ -98,5 +103,6 @@ def build_model(
         cdap_strength=cdap_strength,
         router_temperature=router_temperature,
         noisy_gating_std=noisy_gating_std,
+        ablate=ablate,
     )
     return model, build_layer_proj()
