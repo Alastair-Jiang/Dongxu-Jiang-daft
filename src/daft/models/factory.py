@@ -16,6 +16,7 @@ from daft.models.cross_dim_attn import CrossDimensionAttention
 from daft.models.ensemble import ExpertEnsemble
 from daft.models.experts import (
     EventExpert, MomentumExpert, ReversalExpert, TrendExpert, VolatilityExpert,
+    TransformerExpert,
 )
 from daft.models.hardening import HardeningEngine
 from daft.models.memory import KDAMarketMemory
@@ -32,12 +33,23 @@ N_EXPERTS = 10
 TOP_K = 3
 
 
-def build_experts(hidden: int = 64, n_layers: int = 2) -> nn.ModuleList:
-    """10 专家池: 5 类 × 2 实例(顺序与 conftest 一致)。
+def build_experts(hidden: int = 64, n_layers: int = 2,
+                  arch: str = "mlp", n_heads: int = 4) -> nn.ModuleList:
+    """10 专家池。
+
+    arch="mlp" → 5 类 regime 专家 × 2 实例(顺序与 conftest 一致)。
+    arch="transformer" → 10 个 TransformerExpert(特征自注意力, 2026-08-17
+    研究项目: 独立初始化、全量训练、路由器分工)。
 
     hidden / n_layers: 容量扫描参数(2026-08-17 研究项目)。
     volatility/event 用 0.75× hidden(历史口径 64/48)。
     """
+    if arch == "transformer":
+        return nn.ModuleList([
+            TransformerExpert(input_dim=INPUT_DIM, hidden_dim=hidden,
+                              n_layers=n_layers, n_heads=n_heads)
+            for _ in range(N_EXPERTS)
+        ])
     h_small = max(32, int(hidden * 0.75))
     return nn.ModuleList([
         TrendExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
@@ -102,9 +114,12 @@ def build_model(
     ablate: str = "none",
     hidden: int = 64,
     n_layers: int = 2,
+    arch: str = "mlp",
+    n_heads: int = 4,
 ):
     """一键: experts + ensemble + layer_proj。"""
-    experts = build_experts(hidden=hidden, n_layers=n_layers)
+    experts = build_experts(hidden=hidden, n_layers=n_layers,
+                            arch=arch, n_heads=n_heads)
     model = build_ensemble(
         experts,
         cdap_strength=cdap_strength,

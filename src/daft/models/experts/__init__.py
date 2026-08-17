@@ -6,6 +6,7 @@ from daft.models.experts.reversal_expert import ReversalExpert
 from daft.models.experts.volatility_expert import VolatilityExpert
 from daft.models.experts.event_expert import EventExpert
 from daft.models.experts.momentum_expert import MomentumExpert
+from daft.models.experts.transformer_expert import TransformerExpert
 
 __all__ = [
     "BaseExpert",
@@ -14,4 +15,5 @@ __all__ = [
     "VolatilityExpert",
     "EventExpert",
     "MomentumExpert",
+    "TransformerExpert",
 ]

@@ -105,7 +105,12 @@ def main():
     parser.add_argument("--hidden", type=int, default=64,
                         help="专家 hidden 维度(容量扫描, 默认 64)")
     parser.add_argument("--n-layers", type=int, default=2,
-                        help="专家 MLP 层数(容量扫描, 默认 2)")
+                        help="专家 MLP/Transformer 层数(容量扫描, 默认 2)")
+    parser.add_argument("--arch", default="mlp", choices=["mlp", "transformer"],
+                        help="专家主干架构(2026-08-17): mlp=5类regime专家, "
+                             "transformer=特征自注意力专家")
+    parser.add_argument("--n-heads", type=int, default=4,
+                        help="Transformer 专家注意力头数(默认 4)")
     parser.add_argument("--no-regime", action="store_true",
                         help="Stage1 专家全量训练(README regime 专业化对照)")
     args = parser.parse_args()
@@ -156,7 +161,8 @@ def main():
 
     # ---------- 3. Stage 1: experts (train only) ----------
     print("\n[3/6] Stage 1: 独立专家训练 (仅 train 段)...")
-    experts = build_experts(hidden=args.hidden, n_layers=args.n_layers)
+    experts = build_experts(hidden=args.hidden, n_layers=args.n_layers,
+                            arch=args.arch, n_heads=args.n_heads)
     s1 = Stage1ExpertTrainer(experts=experts, panel=train_panel, device=device)
     t0 = time.time()
     s1_hist = s1.train_all(epochs=cfg["stage1"]["epochs"],
@@ -245,6 +251,8 @@ def main():
         "seed": args.seed,
         "hidden": args.hidden,
         "n_layers": args.n_layers,
+        "arch": args.arch,
+        "n_heads": args.n_heads if args.arch == "transformer" else None,
         "stage1_regime": not args.no_regime,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
