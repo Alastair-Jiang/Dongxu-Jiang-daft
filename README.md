@@ -15,6 +15,20 @@
 
 ---
 
+## 🗺️ Architecture at a Glance
+
+![DAFT overview: plain-language view + engineering view + concrete case study](docs/assets/architecture/daft-architecture-overview.svg)
+
+**Three-part panorama, understand the whole project in one image** (mostly Chinese, diagrams are self-explanatory):
+
+- **Part 1 · 通俗视图** — DAFT as "a self-calibrating 10-analyst investment team": daily market report → 10 analysts with different styles → team lead decides whom to trust → an auto-fading team notebook → round-table cross-calibration. No finance/ML background needed.
+- **Part 2 · 工程视图** — Lossless engineering architecture: the data-flow backbone, the routing/memory/depth modulation loop in the CDAP joint space (with core formulas and zero-perturbation invariants), the expert-pool dispatch mechanism, 3-stage training, and the NO-GO verdict.
+- **Part 3 · 具体案例** — One full day (2025-06-20) for one stock: what goes in, what each of the five steps does, what signal and portfolio action come out — plus the honest 5-year statistics.
+
+Regenerate with: `python scripts/gen_architecture_overview.py` (built-in layout check must report 0 overflow).
+
+---
+
 ## Abstract
 
 Most ML-for-trading systems treat model components — routing, memory, and feature hierarchy — as independent modules with unidirectional data flow. We argue that **these components should bidirectionally modulate one another** to form a coherent decision-making engine.
