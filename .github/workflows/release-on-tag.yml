@@ -1,0 +1,57 @@
+name: Release on Tag
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 解析标签版本与 pre-release 标记
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # 去掉前缀 v 后取 x（主版本号），x/y/z 均为自然数（可为多位数）
+          MAJOR="${TAG#v}"
+          MAJOR="${MAJOR%%.*}"
+          SUFFIX=""
+          PRERELEASE="false"
+          if [ "$MAJOR" = "0" ]; then
+            SUFFIX="-pre-release"
+            PRERELEASE="true"
+          fi
+          ASSET_NAME="daft-${TAG}${SUFFIX}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "suffix=${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: 打包当前全部代码为 zip
+        run: |
+          ASSET_NAME="${{ steps.version.outputs.asset_name }}"
+          # 打包仓库当前全部内容（含隐藏文件），排除 .git
+          zip -r "${ASSET_NAME}.zip" . \
+            -x '.git/*'
+          echo "打包完成: ${ASSET_NAME}.zip"
+          unzip -l "${ASSET_NAME}.zip" | tail -3
+
+      - name: 创建 Release 并上传 zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "daft-${{ steps.version.outputs.tag }}${{ steps.version.outputs.prerelease == 'true' && ' (pre-release)' || '' }}"
+          files: ${{ steps.version.outputs.asset_name }}.zip
+          draft: false
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
