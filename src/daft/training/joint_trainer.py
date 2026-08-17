@@ -44,11 +44,13 @@ class JointTrainer:
         layer_proj: nn.ModuleDict,
         config: dict,
         device: torch.device,
+        lookback_scale: float = 1.0,
     ):
         self.model = model
         self.layer_proj = layer_proj
         self.config = config
         self.device = device
+        self.lookback_scale = lookback_scale
 
     # ------------------------------------------------------------------
     def train(self, train_panel: Panel, val_panel: Panel) -> dict:
@@ -197,7 +199,9 @@ class JointTrainer:
     # ------------------------------------------------------------------
     def _build_dataset(self, panel: Panel):
         """Build s_t, targets, mask from panel."""
-        extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+        extractor = RegimeFeatureExtractor(
+            n_base_factors=50, output_dim=200, lookback_scale=self.lookback_scale
+        )
         with torch.no_grad():
             s_t_raw = extractor(panel)
 
@@ -267,7 +271,7 @@ class JointTrainer:
                 routing_probs = outputs["routing_probs"]
 
                 # --- Joint loss: MSE on final signal + expert consistency ---
-                mse = ((signal - t_b) ** 2 * m_b).sum() / m_b.sum().clamp(min=1)
+                mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
 
                 # Expert consistency: lightly regularize each expert
                 expert_reg = 0.0
@@ -303,7 +307,7 @@ class JointTrainer:
                 with torch.no_grad():
                     outputs = self.model(s_b, layer_outputs, mode="val")
                     signal = outputs["signal"]
-                    mse = ((signal - t_b) ** 2 * m_b).sum() / m_b.sum().clamp(min=1)
+                    mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
                     total_loss += mse.item()
 
                 if return_predictions:

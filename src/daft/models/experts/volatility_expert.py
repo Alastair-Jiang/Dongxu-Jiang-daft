@@ -54,11 +54,12 @@ class VolatilityExpert(BaseExpert):
         pred = pred.squeeze(-1)
         target = target.squeeze(-1)
         mask = mask.squeeze(-1)
+        mask_f = mask.float()  # DirectML 兼容: bool.sum() 需转 float
 
-        mse = ((target - pred) ** 2 * mask).sum() / mask.sum().clamp(min=1)
+        mse = ((target - pred) ** 2 * mask_f).sum() / mask_f.sum().clamp(min=1)
 
         # Variance penalty: discourage extreme predictions in volatile regimes
-        pred_var = ((pred - pred.mean()) ** 2 * mask).sum() / mask.sum().clamp(min=1)
+        pred_var = ((pred - pred.mean()) ** 2 * mask_f).sum() / mask_f.sum().clamp(min=1)
         lambda_reg = 0.01
 
         return mse + lambda_reg * pred_var

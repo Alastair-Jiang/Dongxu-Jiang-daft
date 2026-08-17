@@ -104,11 +104,14 @@ def ohlcv_to_base_panel(panel: Panel, vol_window: int = 20) -> Panel:
     )
 
 
-def ensure_base_panel(panel: Panel) -> Panel:
+def ensure_base_panel(panel: Panel, vol_window: int = 20) -> Panel:
     """Route a panel into the base feature layout (fail loudly on unknowns).
 
     OHLCV layout → converted; base layout → returned with 2D mask.
     Anything else raises a descriptive error.
+
+    vol_window 透传给 ohlcv_to_base_panel, 周线验证(K3 2026-08-17)下
+    lookback_scale=0.2 → 20 日→4 周。
     """
     names = panel.feature_names
     if names is None:
@@ -129,7 +132,7 @@ def ensure_base_panel(panel: Panel) -> Panel:
         )
 
     if names == OHLCV_FEATURE_NAMES:
-        return ohlcv_to_base_panel(panel)
+        return ohlcv_to_base_panel(panel, vol_window=vol_window)
 
     raise ValueError(
         f"无法识别的 feature_names: {names}\n"

@@ -39,6 +39,7 @@ class ExpertEnsemble(nn.Module):
         memory: nn.Module,
         cross_dim_attn: nn.Module,
         hardening,
+        ablate: str = "none",
     ):
         super().__init__()
         self.experts = experts
@@ -46,6 +47,8 @@ class ExpertEnsemble(nn.Module):
         self.memory = memory
         self.cross_dim_attn = cross_dim_attn
         self.hardening = hardening
+        # 消融开关(2026-08-17 研究项目): none | cdap | memory | router
+        self.ablate = ablate
 
         self.n_experts = len(experts)
 
@@ -92,6 +95,10 @@ class ExpertEnsemble(nn.Module):
         # === Step 1: Route to experts ===
         topk_probs, topk_indices, z_t, full_probs = self.router(s_t, mode=mode)
 
+        # 消融: router → 均匀路由(CDAP 与 memory 仍跑, 只去掉"学到的"路由)
+        if self.ablate == "router":
+            full_probs = torch.full_like(full_probs, 1.0 / self.n_experts)
+
         # === Step 2: Expert forward passes ===
         expert_outputs = []
         expert_hiddens = []
@@ -115,7 +122,15 @@ class ExpertEnsemble(nn.Module):
         if self.memory.M is None or self.memory.M.size(0) != B:
             self.memory.reset_state(B, device)
 
-        if mode != "inference" or not use_hardening:
+        if self.ablate == "cdap":
+            # 消融: 跳过 CDAP 三向调制, 路由=原始 softmax, 深度=均匀平均
+            final_routing = full_probs
+            memory_gate = None
+            depth_weights = F.softmax(torch.ones(B, 3, device=device), dim=-1)
+            fused_layers = sum(
+                depth_weights[:, k:k+1] * layer_outputs[k] for k in range(3)
+            )
+        elif mode != "inference" or not use_hardening:
             # Full CDAP modulation
             memory_matrix = self.memory.M.clone()
 
@@ -171,7 +186,11 @@ class ExpertEnsemble(nn.Module):
         # back through the gate to CDAP's memory_gate_scale parameter.
         # The retrieved memory vector contributes to the signal so that
         # the memory pathway receives meaningful gradients.
-        retrieved, _ = self.memory(s_t, z_t=z_t, cdap_gate=memory_gate)
+        if self.ablate == "memory":
+            # 消融: 跳过 KDA 记忆, 检索输出置零(记忆路径不参与信号)
+            retrieved = torch.zeros(B, self.memory.d_v, device=device)
+        else:
+            retrieved, _ = self.memory(s_t, z_t=z_t, cdap_gate=memory_gate)
 
         # === Step 5: Weighted expert fusion ===
         # signal = Σ_i w_i · expert_i(s_t)

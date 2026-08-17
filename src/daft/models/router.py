@@ -150,10 +150,12 @@ class RegimeRouter(nn.Module):
         # === Step 5: Update activation statistics (for Quantile Balancing) ===
         if mode == "train":
             with torch.no_grad():
+                # bincount 在 XPU/DirectML 后端支持不稳: 把 (B*top_k) 的
+                # 小张量搬到 CPU 统计再送回(2026-08-16 后端兼容)。
                 counts = torch.bincount(
-                    topk_indices.flatten(),
+                    topk_indices.flatten().cpu(),
                     minlength=self.n_experts,
-                ).float()
+                ).float().to(s_t.device)
                 self.activation_counts = (
                     0.99 * self.activation_counts + 0.01 * counts
                 )

@@ -39,6 +39,7 @@ from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
 from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
 from daft.utils.experiment import config_hash, next_exp_path
+from daft.utils.device import get_device
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints" / "oos"
@@ -96,10 +97,28 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--universe", default="hs300", choices=["hs300", "sample"],
                         help="股票池(默认 hs300 真实成分)")
+    parser.add_argument("--ablate", default="none",
+                        choices=["none", "cdap", "memory", "router"],
+                        help="消融开关(研究项目): 关闭 CDAP/记忆/路由")
+    parser.add_argument("--ckpt-dir", default="checkpoints/oos",
+                        help="checkpoint 目录(默认 checkpoints/oos)")
+    parser.add_argument("--hidden", type=int, default=64,
+                        help="专家 hidden 维度(容量扫描, 默认 64)")
+    parser.add_argument("--n-layers", type=int, default=2,
+                        help="专家 MLP/Transformer 层数(容量扫描, 默认 2)")
+    parser.add_argument("--arch", default="mlp", choices=["mlp", "transformer"],
+                        help="专家主干架构(2026-08-17): mlp=5类regime专家, "
+                             "transformer=特征自注意力专家")
+    parser.add_argument("--n-heads", type=int, default=4,
+                        help="Transformer 专家注意力头数(默认 4)")
+    parser.add_argument("--no-regime", action="store_true",
+                        help="Stage1 专家全量训练(README regime 专业化对照)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    device = torch.device("cpu")
+    # 设备自动检测(2026-08-16 接线): CUDA → XPU(Intel Arc) → DirectML → MPS → CPU
+    device = get_device()
+    print(f"      Device: {device}")
     t_total = time.time()
 
     cfg = {
@@ -142,18 +161,20 @@ def main():
 
     # ---------- 3. Stage 1: experts (train only) ----------
     print("\n[3/6] Stage 1: 独立专家训练 (仅 train 段)...")
-    experts = build_experts()
+    experts = build_experts(hidden=args.hidden, n_layers=args.n_layers,
+                            arch=args.arch, n_heads=args.n_heads)
     s1 = Stage1ExpertTrainer(experts=experts, panel=train_panel, device=device)
     t0 = time.time()
     s1_hist = s1.train_all(epochs=cfg["stage1"]["epochs"],
                            batch_size=cfg["stage1"]["batch_size"],
-                           lr=cfg["stage1"]["lr"], verbose=True)
+                           lr=cfg["stage1"]["lr"], verbose=False,
+                           use_regime=not args.no_regime)
     stage1_seconds = time.time() - t0
     print(f"      Stage 1 耗时: {stage1_seconds:.1f}s")
 
     # ---------- 4. Stage 2 + 3 (train + val only) ----------
     print("\n[4/6] Stage 2 + 3: 路由/记忆/CDAP + 联合微调 (仅 train+val 段)...")
-    model = build_ensemble(experts, cdap_strength=0.1)
+    model = build_ensemble(experts, cdap_strength=0.1, ablate=args.ablate)
     layer_proj = build_layer_proj()
 
     s2 = RouterTrainer(model=model, config=cfg["stage2"], device=device)
@@ -169,9 +190,10 @@ def main():
     print(f"      Stage 3 耗时: {time.time()-t0:.1f}s")
 
     # Save checkpoints
-    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
-    s3.save_checkpoints(str(CHECKPOINT_DIR))
-    print(f"      Checkpoints → {CHECKPOINT_DIR}")
+    ckpt_dir = Path(args.ckpt_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    s3.save_checkpoints(str(ckpt_dir))
+    print(f"      Checkpoints → {ckpt_dir}")
 
     # ---------- 5. OOS signals: normalization from TRAIN only ----------
     print("\n[5/6] 样本外信号生成 (标准化统计量仅来自 train 段)...")
@@ -225,6 +247,13 @@ def main():
     report = {
         "experiment_id": None,  # 下方写入
         "model": "DAFT_full_pipeline",
+        "ablate": args.ablate,
+        "seed": args.seed,
+        "hidden": args.hidden,
+        "n_layers": args.n_layers,
+        "arch": args.arch,
+        "n_heads": args.n_heads if args.arch == "transformer" else None,
+        "stage1_regime": not args.no_regime,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,

@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 import warnings
 from typing import Optional
 
@@ -49,6 +50,7 @@ def get_device(prefer: str = "auto", verbose: bool = True) -> torch.device:
     # Honour explicit preference (non-auto)
     if prefer != "auto":
         device = torch.device(_normalise_name(prefer))
+        _apply_cuda_memory_fraction(device)
         if verbose:
             _logger.info("Device: %s (forced)", device)
         return device
@@ -59,7 +61,9 @@ def get_device(prefer: str = "auto", verbose: bool = True) -> torch.device:
 
     # --- Detection chain ---
     backend = _detect_backend()
-    device = torch.device(backend)
+    # 检测名(directml 等)需先归一化为 torch 设备串(privateuseone:0 等)
+    device = torch.device(_normalise_name(backend))
+    _apply_cuda_memory_fraction(device)
 
     _cached_device = device
     _cached_backend = backend
@@ -109,6 +113,24 @@ def device_info() -> dict:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _apply_cuda_memory_fraction(device: torch.device) -> None:
+    """Limit this process's CUDA memory fraction via DAFT_CUDA_FRACTION env.
+
+    2026-08-17 蓝屏教训: 4 任务并行把物理显存推到 15.5GB 并溢出到 Windows
+    共享内存导致系统崩溃。设置 DAFT_CUDA_FRACTION=0.42 可把单进程显存硬
+    封顶(0.42×16GB≈6.9GB), 2 任务并行合计 ~13.7GB < 15GB 可用线; 超限时
+    PyTorch 会干净地报 CUDA OOM 而不是溢出到共享内存。
+    """
+    raw = os.environ.get("DAFT_CUDA_FRACTION", "0") or "0"
+    try:
+        frac = float(raw)
+    except ValueError:
+        return
+    if frac > 0 and device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.set_per_process_memory_fraction(frac, device.index or 0)
+        _logger.info("CUDA memory fraction capped at %.2f (DAFT_CUDA_FRACTION)", frac)
+
 
 def _detect_backend() -> str:
     """Run the detection chain and return the best backend name string."""
@@ -171,7 +193,7 @@ def _directml_device_string() -> str:
     """Return the torch-directml device string (typically 'privateuseone:0')."""
     try:
         import torch_directml
-        return str(torch_directml.default_device())
+        return str(torch_directml.device())   # e.g. 'privateuseone:0'
     except ImportError:
         # If torch-directml is requested but not installed, we still return a
         # string that will produce a clear error message from torch.device().

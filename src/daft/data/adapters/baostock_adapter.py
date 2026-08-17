@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 from typing import Dict, List, Optional
 import logging
+from pathlib import Path
 
 import torch
 
@@ -56,15 +57,35 @@ class BaostockAdapter:
         self.adjust = config.get("adjust", "2")            # 2 = forward-adjusted
         # 涨跌停处理(2026-08-16 新增): True → 涨跌停日 mask=False(不可成交)
         self.handle_limit_up_down = config.get("handle_limit_up_down", True)
+        # 磁盘缓存(2026-08-16 新增): True → 首次下载后缓存 Panel, 同样参数
+        # 再跑时直接加载, 免重复联网下载(100 股×2400 天约省 20-40 分钟)
+        self.use_cache = config.get("use_cache", True)
+        self.cache_dir = Path(config.get("cache_dir", "data/cache"))
         self.feature_names = ["open", "high", "low", "close", "volume"]
 
     # ------------------------------------------------------------------
+    def _cache_path(self) -> Path:
+        """缓存文件路径, 由影响数据的全部参数决定。"""
+        key = (
+            f"baostock_{self.universe}_{self.n_stocks}_{self.start_date}"
+            f"_{self.end_date}_{self.adjust}_{int(self.handle_limit_up_down)}"
+            f"_{self.tickers or ''}"
+        )
+        import hashlib
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
+        return self.cache_dir / f"{digest}.pt"
+
     def load(self) -> Panel:
-        """Download data and return Panel.
+        """Download data (with disk cache) and return Panel.
 
         Requires ``pip install baostock``. Registration is free at
         http://baostock.com but not required for basic daily data.
         """
+        cache_path = self._cache_path()
+        if self.use_cache and cache_path.exists():
+            _logger.info("Loading cached panel: %s", cache_path)
+            return torch.load(cache_path, weights_only=False)
+
         try:
             import baostock as bs
             import pandas as pd
@@ -105,7 +126,18 @@ class BaostockAdapter:
             raise RuntimeError("No data downloaded — check baostock connection and dates.")
 
         # --- Align to common date index ---
-        return self._to_panel(all_data)
+        panel = self._to_panel(all_data)
+
+        # --- 写磁盘缓存(2026-08-16): 下次同参数直接加载, 免重复下载 ---
+        if self.use_cache:
+            try:
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                torch.save(panel, cache_path)
+                _logger.info("Panel cached → %s", cache_path)
+            except Exception as e:  # noqa: BLE001 — 缓存失败不影响返回数据
+                _logger.warning("Cache write failed: %r", e)
+
+        return panel
 
     # ------------------------------------------------------------------
     def _resolve_universe(self, bs) -> list:
