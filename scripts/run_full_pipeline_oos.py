@@ -235,6 +235,7 @@ def main():
         "experiment_id": None,  # 下方写入
         "model": "DAFT_full_pipeline",
         "ablate": args.ablate,
+        "seed": args.seed,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,
