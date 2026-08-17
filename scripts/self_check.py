@@ -112,6 +112,17 @@ has_old_entropy_pair = re.search(r"entropy_weight \* routing_entropy", rt) is no
 check("5. 路由损失结构", has_balance_kl and not has_old_entropy_pair,
       "balance KL 存在" if has_balance_kl else "balance KL 缺失")
 
+# ── 6. git 工作树卫生(未提交文件提醒, 不阻塞) ────────────────────────
+r = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
+                   capture_output=True, text=True)
+dirty = [l for l in r.stdout.splitlines() if l.strip()]
+if dirty:
+    WARNINGS.append(f"git 工作树有 {len(dirty)} 个未提交项(并行会话或遗漏): "
+                    + ", ".join(l.split()[-1] for l in dirty[:6])
+                    + ("..." if len(dirty) > 6 else ""))
+else:
+    OK.append("6. git 工作树干净")
+
 print("\n" + "=" * 60)
 print(f"自检结果: {len(OK)} 通过, {len(ISSUES)} 阻塞, {len(WARNINGS)} 告警")
 for o in OK:
