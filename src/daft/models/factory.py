@@ -32,19 +32,24 @@ N_EXPERTS = 10
 TOP_K = 3
 
 
-def build_experts() -> nn.ModuleList:
-    """10 专家池: 5 类 × 2 实例(顺序与 conftest 一致)。"""
+def build_experts(hidden: int = 64, n_layers: int = 2) -> nn.ModuleList:
+    """10 专家池: 5 类 × 2 实例(顺序与 conftest 一致)。
+
+    hidden / n_layers: 容量扫描参数(2026-08-17 研究项目)。
+    volatility/event 用 0.75× hidden(历史口径 64/48)。
+    """
+    h_small = max(32, int(hidden * 0.75))
     return nn.ModuleList([
-        TrendExpert(input_dim=INPUT_DIM, hidden_dim=64),
-        TrendExpert(input_dim=INPUT_DIM, hidden_dim=64),
-        ReversalExpert(input_dim=INPUT_DIM, hidden_dim=64),
-        ReversalExpert(input_dim=INPUT_DIM, hidden_dim=64),
-        VolatilityExpert(input_dim=INPUT_DIM, hidden_dim=48),
-        VolatilityExpert(input_dim=INPUT_DIM, hidden_dim=48),
-        EventExpert(input_dim=INPUT_DIM, hidden_dim=48),
-        EventExpert(input_dim=INPUT_DIM, hidden_dim=48),
-        MomentumExpert(input_dim=INPUT_DIM, hidden_dim=64),
-        MomentumExpert(input_dim=INPUT_DIM, hidden_dim=64),
+        TrendExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
+        TrendExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
+        ReversalExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
+        ReversalExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
+        VolatilityExpert(input_dim=INPUT_DIM, hidden_dim=h_small, n_layers=n_layers),
+        VolatilityExpert(input_dim=INPUT_DIM, hidden_dim=h_small, n_layers=n_layers),
+        EventExpert(input_dim=INPUT_DIM, hidden_dim=h_small, n_layers=n_layers),
+        EventExpert(input_dim=INPUT_DIM, hidden_dim=h_small, n_layers=n_layers),
+        MomentumExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
+        MomentumExpert(input_dim=INPUT_DIM, hidden_dim=hidden, n_layers=n_layers),
     ])
 
 
@@ -95,9 +100,11 @@ def build_model(
     router_temperature: float = 1.0,
     noisy_gating_std: float = 0.1,
     ablate: str = "none",
+    hidden: int = 64,
+    n_layers: int = 2,
 ):
     """一键: experts + ensemble + layer_proj。"""
-    experts = build_experts()
+    experts = build_experts(hidden=hidden, n_layers=n_layers)
     model = build_ensemble(
         experts,
         cdap_strength=cdap_strength,

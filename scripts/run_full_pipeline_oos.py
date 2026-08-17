@@ -102,6 +102,10 @@ def main():
                         help="消融开关(研究项目): 关闭 CDAP/记忆/路由")
     parser.add_argument("--ckpt-dir", default="checkpoints/oos",
                         help="checkpoint 目录(默认 checkpoints/oos)")
+    parser.add_argument("--hidden", type=int, default=64,
+                        help="专家 hidden 维度(容量扫描, 默认 64)")
+    parser.add_argument("--n-layers", type=int, default=2,
+                        help="专家 MLP 层数(容量扫描, 默认 2)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -150,7 +154,7 @@ def main():
 
     # ---------- 3. Stage 1: experts (train only) ----------
     print("\n[3/6] Stage 1: 独立专家训练 (仅 train 段)...")
-    experts = build_experts()
+    experts = build_experts(hidden=args.hidden, n_layers=args.n_layers)
     s1 = Stage1ExpertTrainer(experts=experts, panel=train_panel, device=device)
     t0 = time.time()
     s1_hist = s1.train_all(epochs=cfg["stage1"]["epochs"],
@@ -236,6 +240,8 @@ def main():
         "model": "DAFT_full_pipeline",
         "ablate": args.ablate,
         "seed": args.seed,
+        "hidden": args.hidden,
+        "n_layers": args.n_layers,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,

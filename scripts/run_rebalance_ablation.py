@@ -31,10 +31,10 @@ from daft.utils.device import get_device
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 
-def build_ablation_model(ablate="none"):
+def build_ablation_model(ablate="none", hidden=64, n_layers=2):
     return build_model(
         cdap_strength=1.0, router_temperature=0.1, noisy_gating_std=0.0,
-        ablate=ablate,
+        ablate=ablate, hidden=hidden, n_layers=n_layers,
     )
 
 
@@ -78,6 +78,8 @@ def main():
                         help="checkpoint 目录")
     parser.add_argument("--ablate", default="none",
                         choices=["none", "cdap", "memory", "router"])
+    parser.add_argument("--hidden", type=int, default=64)
+    parser.add_argument("--n-layers", type=int, default=2)
     args = parser.parse_args()
     freqs = [int(x) for x in args.freqs.split(",")]
     lambdas = [float(x) for x in args.lambdas.split(",")]
@@ -94,7 +96,8 @@ def main():
     t_train_end, t_val_end = int(T * 0.6), int(T * 0.8)
     print(f"Panel: (T={T}, N={N})  train:[0,{t_train_end}) val:[{t_train_end},{t_val_end}) test:[{t_val_end},{T})")
 
-    model, layer_proj = build_ablation_model(ablate=args.ablate)
+    model, layer_proj = build_ablation_model(ablate=args.ablate,
+                                             hidden=args.hidden, n_layers=args.n_layers)
     ckpt_dir = Path(args.ckpt_dir)
     if not ckpt_dir.exists():
         raise FileNotFoundError(f"{ckpt_dir} 不存在 — 先跑 run_full_pipeline_oos.py --ckpt-dir ...")
