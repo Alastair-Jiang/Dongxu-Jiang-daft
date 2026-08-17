@@ -57,6 +57,8 @@ for f in sorted(OUTPUTS.glob("EXP-*.json")):
         ok_struct = "test" in r and "val" in r
     elif "walk-forward" in name:
         ok_struct = "folds" in r
+    elif "feature-ablation" in name:
+        ok_struct = "groups" in r and "full" in r["groups"]
     else:  # daft-oos / ridge-real / weekly 等
         ok_struct = "ic_mean" in r.get("out_of_sample", {}) \
             and "sharpe_ratio" in r.get("backtest", {})
