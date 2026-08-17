@@ -1,10 +1,10 @@
-# DAFT Project Log — v0.2.0
+# DAFT Project Log — v0.0.1（旧规则:v0.2.0）
 
 **Dimension-Aware Financial Trading: A Cross-Dimensional Attention Architecture for Medium-Frequency Quantitative Trading**
 
 | | |
 |---|---|
-| **Version** | v0.2.0 (2026-08-07) |
+| **Version** | v0.0.1（旧规则:v0.2.0） (2026-08-07) |
 | **Repository** | [github.com/Alastair-Jiang/Dongxu-Jiang-daft](https://github.com/Alastair-Jiang/Dongxu-Jiang-daft) |
 | **Code size** | ~8,800 lines (Python, PyTorch) |
 | **License** | MIT |
@@ -67,10 +67,10 @@ This is formalized as the **Cross-Dimension Attention Protocol (CDAP)** — the 
 
 ## 3. Progress
 
-### v0.1.0 (2026-07) — Core architecture
+### v0.1.0 (2026-07) — Core architecture（旧规则最早版本，新规则下未重编号）
 - All four model components, 200-d feature engine, synthetic data generator (HMM 3-regime × 3-factor model), Stage-1 expert training, smoke tests.
 
-### v0.2.0 (2026-08-06/07) — Full pipeline end-to-end
+### v0.0.1 (2026-08-06/07) — Full pipeline end-to-end（旧规则:v0.2.0）
 All `NotImplementedError`s eliminated:
 
 | Module | What was added |

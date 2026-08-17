@@ -1,7 +1,7 @@
 # DAFT 项目复盘报告(全版本总结性评估)
 
 > **报告日期**: 2026-08-18 · **数据截止**: commit `6142f1f`(2026-08-17)
-> **范围**: 仓库 `Dongxu-Jiang-daft` 全部版本(v0.1.0 → v0.3.0 + 研究期),git 历史 50 提交
+> **范围**: 仓库 `Dongxu-Jiang-daft` 全部版本(旧规则~v0.1.0 → v0.3.0 + 研究期；新规则下研究期最新为 v0.2.1),git 历史 50 提交
 > **方法**: 全部结论可追溯到仓库内容(逐条标注文件/章节/EXP ID)或已注明的外部来源;无法核实者标注「推测 / 待验证」,不臆造。
 
 ---
@@ -14,17 +14,17 @@ DAFT(Dimension-Aware Financial Trading)在 23 天(2026-07-25 → 2026-08-17)内�
 
 ## 一、版本编年史(版本号与日期)
 
-版本号取自仓库自身标注(commit 信息 / CHANGELOG.md / pyproject.toml / SPECIFICATION.md 版本表)。仓库存在版本号,故沿用;08-17 之后无新版本号(pyproject 仍为 0.3.0),本报告将其标注为分析性细分 **v0.3.0-research(研究期)**,依据:代码版本未变、工作性质从"交易系统开发"转为"研究归因"(ROADMAP.md §M5/M6)。
+版本号取自仓库自身标注(commit 信息 / CHANGELOG.md / pyproject.toml / SPECIFICATION.md 版本表)。仓库存在版本号,故沿用;08-17 之后无新版本号(pyproject 仍为 0.3.0（旧规则版本号）),本报告将其标注为分析性细分 **v0.2.0（旧规则:v0.3.0-research）(研究期)**,依据:代码版本未变、工作性质从"交易系统开发"转为"研究归因"(ROADMAP.md §M5/M6)。
 
 | 版本 | 日期 | 标志事件 | 来源 |
 |---|---|---|---|
-| **v0.1.0** | 2026-07-25 | Initial commit;4 组件 + 5 类专家 + 特征引擎 + Stage1 + smoke test;合成数据 | commit `b9f90ab`;CHANGELOG.md §v0.1.0;SPEC 版本表 |
+| **v0.1.0**（旧规则最早版本，新规则下未重编号） | 2026-07-25 | Initial commit;4 组件 + 5 类专家 + 特征引擎 + Stage1 + smoke test;合成数据 | commit `b9f90ab`;CHANGELOG.md §v0.1.0（旧规则最早）;SPEC 版本表 |
 | (07-27) | 2026-07-27 | PR 预更新报告自动生成系统 | commit `ef33ad5` |
-| **v0.2.0** | 2026-08-07 | 全管道打通(消除所有 NotImplementedError);设备检测/回测引擎/组合优化/适配器/Stage2+3;合成实验 50 股×300 天(总耗时 295.5s,回测 IC +0.0203,Sharpe −1.79) | commit `088306a`;CHANGELOG.md §v0.2.0;PROJECT_REPORT.md §3.2 |
-| **v0.3.0(日志义)** | 2026-08-07 | 首次真实 A 股样本外对决(Ridge 30 股 IC +0.0285 vs DAFT 20 股 +0.0252,换手口径为代理);**注意:与 08-16 的 v0.3.0 同号不同义,见 §五矛盾点 #1** | commit `d77b6e0`;Learn-new/DAFT-项目日志-v0.3.0-样本外公平对决.md |
-| **说明书 v1.0**(文档版) | 2026-08-09 | 技术说明书 v1.0;safe gate bug 修复(#6,α∈(0,0.001)→(0.001,1));n_experts 8→10(#7);Kimi K3 评审落实(#8:路由稀疏化/信号平滑/实验登记) | commits `643f403`/`9380c32`/`5f5cf5d`/`bd295f5`;COLLABORATION.md v1.0 |
-| **v0.3.0(代码义)** | 2026-08-16 | **工程修复批次(PR #9)+ 全面升级(PR #10)**:通道契约修复(此前实验全部作废)、口径统一、工厂去重、涨跌停 mask、hs300 成分池、SPEC 重写为 v0.3.0、pyproject=0.3.0 | commits `fcfa5fc`/`2d557fc`;CHANGELOG.md §v0.3.0;FIX_REPORT_20260816.md;pyproject.toml |
-| **v0.3.0-research**(分析性细分) | 2026-08-17 | 上午:周线验证红灯 → **正式 NO-GO(架构)**(commit `14b8767`);下午→晚:消融归因 / 300 股扩规模 / 容量扫描 / 特征边际 / 跨市场 / 专家层拟合 / 自检+自动部署;晚:Transformer 专家架构批次(实现+锚点复现+显存封顶;训练暂停);产物归档 Release | commits `14b8767`…`6142f1f`;DECISION_20260930.md;RESEARCH_FINDINGS_2026-08-17.md;UPDATE_LOG_2026-08-17-transformer.md |
+| **v0.0.1（旧规则:v0.2.0）** | 2026-08-07 | 全管道打通(消除所有 NotImplementedError);设备检测/回测引擎/组合优化/适配器/Stage2+3;合成实验 50 股×300 天(总耗时 295.5s,回测 IC +0.0203,Sharpe −1.79) | commit `088306a`;CHANGELOG.md §v0.0.1（旧规则:v0.2.0）;PROJECT_REPORT.md §3.2 |
+| **v0.0.2（旧规则:v0.3.0 日志义）** | 2026-08-07 | 首次真实 A 股样本外对决(Ridge 30 股 IC +0.0285 vs DAFT 20 股 +0.0252,换手口径为代理);**注意:与 08-16 的 v0.3.0（旧规则同号）同号不同义,见 §五矛盾点 #1** | commit `d77b6e0`;Learn-new/DAFT-项目日志-v0.3.0-样本外公平对决.md（文件名未随新规则更名） |
+| **v0.0.3（旧规则:说明书 v1.0）**(文档版) | 2026-08-09 | 技术说明书 v0.0.3（旧规则:说明书 v1.0）;safe gate bug 修复(#6,α∈(0,0.001)→(0.001,1));n_experts 8→10(#7);Kimi K3 评审落实(#8:路由稀疏化/信号平滑/实验登记) | commits `643f403`/`9380c32`/`5f5cf5d`/`bd295f5`;COLLABORATION.md v1.0 |
+| **v0.1.0（旧规则:v0.3.0 代码义）** | 2026-08-16 | **工程修复批次(PR #9)+ 全面升级(PR #10)**:通道契约修复(此前实验全部作废)、口径统一、工厂去重、涨跌停 mask、hs300 成分池、SPEC 重写为 v0.3.0（旧规则）、pyproject=0.3.0（旧规则） | commits `fcfa5fc`/`2d557fc`;CHANGELOG.md §v0.1.0（旧规则:v0.3.0 代码义）;FIX_REPORT_20260816.md;pyproject.toml |
+| **v0.2.0（旧规则:v0.3.0-research）**(分析性细分) | 2026-08-17 | 上午:周线验证红灯 → **正式 NO-GO(架构)**(commit `14b8767`);下午→晚:消融归因 / 300 股扩规模 / 容量扫描 / 特征边际 / 跨市场 / 专家层拟合 / 自检+自动部署;晚:Transformer 专家架构批次(实现+锚点复现+显存封顶;训练暂停);产物归档 Release | commits `14b8767`…`6142f1f`;DECISION_20260930.md;RESEARCH_FINDINGS_2026-08-17.md;UPDATE_LOG_2026-08-17-transformer.md |
 
 ![版本演进时间线](assets/retrospective/timeline.svg)
 *数据来源: git log(d7aa39c…6142f1f,50 提交);版本号取自 CHANGELOG.md / commit 信息 / SPECIFICATION.md 版本表 / pyproject.toml*
@@ -37,44 +37,44 @@ DAFT(Dimension-Aware Financial Trading)在 23 天(2026-07-25 → 2026-08-17)内�
 
 | 版本 | 目标设定 | 技术路线 | 架构设计要点 | 来源 |
 |---|---|---|---|---|
-| v0.1.0 | 把 K3 架构移植到金融时序 | 4 组件直接映射:LatentMoE→RegimeRouter、KDA→市场记忆、AttnRes→特征层、新增 CDAP+AHM | 8 专家(4 类×2)、top-3、latent 16、275,099 参数 | PROJECT_REPORT §1/§2;experiments.md EXP001 |
-| v0.2.0 | 工程闭环:全管道可跑 | 补齐回测引擎/组合优化/指标/适配器/Stage2+3 | 合成数据端到端验证;代码 ~8,800 行(+52%) | PROJECT_REPORT §3.2;CHANGELOG v0.2.0 |
-| v0.3.0(日志义) | 真实数据 + 公平基线对决 | baostock 真实 A 股、严格样本外、Ridge 同口径 | MomentumExpert 入池 → 10 专家(commit `0eda883`) | Learn-new v0.3.0 日志 |
-| 说明书 v1.0 | 评审驱动质量修复 | K3 评审:safe gate / 路由稀疏 / 信号平滑 / 实验登记 | 架构不变,训练协议改 | commits `9380c32`/`bd295f5`;REGISTRY §2 |
-| v0.3.0(代码义) | 工程正确性优先于新功能 | 通道契约/口径/工厂去重/涨跌停/hs300 池 | 10 专家统一;核心参数 ≈31.5 万,含 layer_proj ≈41.7 万 | FIX_REPORT §1;SPEC §1.4 |
-| v0.3.0-research | 判定 → 归因 → 证伪边界 | 预注册红黄绿灯落闸;消融开关;容量/规模/跨市场/特征组扫描 | 新增 TransformerExpert(200→40 token×5 特征自注意力,pre-LN) | DECISION;RESEARCH_FINDINGS;transformer_expert.py;UPDATE_LOG §2 |
+| v0.1.0（旧规则最早版本） | 把 K3 架构移植到金融时序 | 4 组件直接映射:LatentMoE→RegimeRouter、KDA→市场记忆、AttnRes→特征层、新增 CDAP+AHM | 8 专家(4 类×2)、top-3、latent 16、275,099 参数 | PROJECT_REPORT §1/§2;experiments.md EXP001 |
+| v0.0.1（旧规则:v0.2.0） | 工程闭环:全管道可跑 | 补齐回测引擎/组合优化/指标/适配器/Stage2+3 | 合成数据端到端验证;代码 ~8,800 行(+52%) | PROJECT_REPORT §3.2;CHANGELOG v0.0.1（旧规则:v0.2.0） |
+| v0.0.2（旧规则:v0.3.0 日志义） | 真实数据 + 公平基线对决 | baostock 真实 A 股、严格样本外、Ridge 同口径 | MomentumExpert 入池 → 10 专家(commit `0eda883`) | Learn-new v0.0.2 日志（旧规则:v0.3.0 日志义） |
+| v0.0.3（旧规则:说明书 v1.0） | 评审驱动质量修复 | K3 评审:safe gate / 路由稀疏 / 信号平滑 / 实验登记 | 架构不变,训练协议改 | commits `9380c32`/`bd295f5`;REGISTRY §2 |
+| v0.1.0（旧规则:v0.3.0 代码义） | 工程正确性优先于新功能 | 通道契约/口径/工厂去重/涨跌停/hs300 池 | 10 专家统一;核心参数 ≈31.5 万,含 layer_proj ≈41.7 万 | FIX_REPORT §1;SPEC §1.4 |
+| v0.2.0（旧规则:v0.3.0-research） | 判定 → 归因 → 证伪边界 | 预注册红黄绿灯落闸;消融开关;容量/规模/跨市场/特征组扫描 | 新增 TransformerExpert(200→40 token×5 特征自注意力,pre-LN) | DECISION;RESEARCH_FINDINGS;transformer_expert.py;UPDATE_LOG §2 |
 
 ### 2.2 数学公式演进(损失 / 指标 / 训练配置)
 
 | 版本 | 公式/配置 | 变化与理由 | 来源 |
 |---|---|---|---|
-| v0.1.0→v0.3.0 | 专家损失(5 类异构):Trend 方向错 ×11、Momentum 方向错 ×8、Event BCE、Volatility MSE+0.01·Var、Reversal Negative Rank IC;输出 SiTU `σ(x)⊙tanh(x)` 有界 | 基本未变;MomentumExpert v0.3.0(日志义)新增 | SPEC §7;momentum_expert.py |
-| v0.1.0 | safe gate:`α = σ(exp(A_log)·(SiTU(...)+dt_bias))` 上界 bug → α∈(0, 0.001),记忆永远近全忘 | **bug**:遗忘门压在近零区间 | commit `9380c32`(#6);SPEC §6.2 |
-| 说明书 v1.0(08-09) | safe gate 修复为 `lower_bound + (1−lower_bound)·σ(...)`,α∈(0.001, 1);K3 评审落地:路由稀疏化 + 信号平滑 + 实验登记表 | 评审驱动修复 | FIX_REPORT;REGISTRY §2 |
+| v0.1.0(旧规则最早)→v0.3.0(旧规则) | 专家损失(5 类异构):Trend 方向错 ×11、Momentum 方向错 ×8、Event BCE、Volatility MSE+0.01·Var、Reversal Negative Rank IC;输出 SiTU `σ(x)⊙tanh(x)` 有界 | 基本未变;MomentumExpert v0.0.2（旧规则:v0.3.0 日志义）新增 | SPEC §7;momentum_expert.py |
+| v0.1.0（旧规则最早版本） | safe gate:`α = σ(exp(A_log)·(SiTU(...)+dt_bias))` 上界 bug → α∈(0, 0.001),记忆永远近全忘 | **bug**:遗忘门压在近零区间 | commit `9380c32`(#6);SPEC §6.2 |
+| v0.0.3（旧规则:说明书 v1.0）(08-09) | safe gate 修复为 `lower_bound + (1−lower_bound)·σ(...)`,α∈(0.001, 1);K3 评审落地:路由稀疏化 + 信号平滑 + 实验登记表 | 评审驱动修复 | FIX_REPORT;REGISTRY §2 |
 | 08-09 | 路由熵正则:`loss − entropy_weight·H + sparsity_weight·H`,两项同式等权 → **精确抵消为 0**,后续致路由塌缩(熵→0.000) | **失误实现**(K3 建议被错误翻译) | routing-collapse-diagnosis §二;DECISION 阶段1 |
-| v0.3.0(08-16) | 口径统一:IC 对齐 k→k+1;换手改真实仓位换手;MaxDD 改百分比;masked 做空 bug 修复;CDAP 由概率空间改 **logit 空间**(`softmax(log p + δ·W·j)`);val-IC 改逐时步截面 rank IC;λ 平滑参数只在 val 选 | 修复批次核心;此前数字全部作废 | FIX_REPORT §1 表(5060b9b…f8c1c8e);SPEC §6.3/§11 |
-| v0.3.0-research(08-17) | 路由损失改 **Switch 式负载均衡 KL**:`loss + balance_weight·KL`(0.01),温度退火 1.0→0.5;周线 `lookback_scale=0.2`;熵恢复收敛(2.064→0.643) | 修复塌缩;但修复后 full OOS IC 0.0066 **反低于塌缩版 0.0251**(反直觉事件,见 §三失误项讨论) | DECISION 阶段2;router_trainer.py;routing-collapse §八 |
-| v0.3.0-research(08-17) | TransformerExpert:200 维 → 40 token×5 → 线性嵌入+可学习位置编码 → pre-LN TransformerEncoder(GELU,4×FFN)→ 均值池化 → SiTU head;损失为通用 masked MSE | 架构升级批次(训练暂停) | transformer_expert.py;UPDATE_LOG §2 |
+| v0.1.0（旧规则:v0.3.0 代码义 08-16） | 口径统一:IC 对齐 k→k+1;换手改真实仓位换手;MaxDD 改百分比;masked 做空 bug 修复;CDAP 由概率空间改 **logit 空间**(`softmax(log p + δ·W·j)`);val-IC 改逐时步截面 rank IC;λ 平滑参数只在 val 选 | 修复批次核心;此前数字全部作废 | FIX_REPORT §1 表(5060b9b…f8c1c8e);SPEC §6.3/§11 |
+| v0.2.0（旧规则:v0.3.0-research）(08-17) | 路由损失改 **Switch 式负载均衡 KL**:`loss + balance_weight·KL`(0.01),温度退火 1.0→0.5;周线 `lookback_scale=0.2`;熵恢复收敛(2.064→0.643) | 修复塌缩;但修复后 full OOS IC 0.0066 **反低于塌缩版 0.0251**(反直觉事件,见 §三失误项讨论) | DECISION 阶段2;router_trainer.py;routing-collapse §八 |
+| v0.2.0（旧规则:v0.3.0-research）(08-17) | TransformerExpert:200 维 → 40 token×5 → 线性嵌入+可学习位置编码 → pre-LN TransformerEncoder(GELU,4×FFN)→ 均值池化 → SiTU head;损失为通用 masked MSE | 架构升级批次(训练暂停) | transformer_expert.py;UPDATE_LOG §2 |
 | 全程 | 成本模型:`(tc 5bp + slippage 1bp) × turnover`,top 20% 多空,涨跌停 mask(±9.5%/±19.5%),T+1 结构性满足 | 固定不变(预注册冻结) | SPEC §11;decision-prespec |
 
 ### 2.3 数据管理模式演进
 
-| 维度 | 早期(v0.1~v0.2) | v0.3.0 后 | 来源 |
+| 维度 | 早期(旧规则 v0.1~v0.2,最早版本) | 旧规则 v0.3.0 后 | 来源 |
 |---|---|---|---|
 | 数据源 | 合成数据(50×300 天) | baostock 真实 A 股(hs300 成分池,30→100→300 股)+ yfinance 美股;磁盘缓存(`42ba56e`) | FIX_REPORT;baostock_adapter.py |
 | 数据质量防线 | 无 | 通道契约 `ensure_base_panel`(防 OHLCV 错列)、涨跌停 mask、30→23 静默缩水重试 | FIX_REPORT §1;SELF_CHECK §一公式断言 |
 | 产物管理 | 固定文件名覆盖 | 唯一 EXP-YYYYMMDD-NN 文件名 + config hash + seed 字段(硬要求);78 份 EXP 报告自检核验 | REGISTRY §1;SELF_CHECK.md;UPDATE_LOG §5 |
-| 配置/依赖 | configs/*.yaml(死配置,未接入,SPEC §12) | 代码内常量 + argparse;pyproject 0.3.0;CI 依赖修复(`5233abd`);`D:\env`(torch 2.11.0+cu128,RTX 5060 Ti) | routing-collapse §七/八;pyproject.toml |
-| 算力管理 | CPU(v0.2.0 全管道 295.5s)→ DirectML(Stage3 曾 43,114.7s ≈12h) | CUDA cu128(smoke 16.1ms/iter);`DAFT_CUDA_FRACTION` 显存封顶(蓝屏教训机制化) | routing-collapse §七;UPDATE_LOG §4 |
+| 配置/依赖 | configs/*.yaml(死配置,未接入,SPEC §12) | 代码内常量 + argparse;pyproject 0.3.0（旧规则版本号）;CI 依赖修复(`5233abd`);`D:\env`(torch 2.11.0+cu128,RTX 5060 Ti) | routing-collapse §七/八;pyproject.toml |
+| 算力管理 | CPU(v0.0.1（旧规则:v0.2.0） 全管道 295.5s)→ DirectML(Stage3 曾 43,114.7s ≈12h) | CUDA cu128(smoke 16.1ms/iter);`DAFT_CUDA_FRACTION` 显存封顶(蓝屏教训机制化) | routing-collapse §七;UPDATE_LOG §4 |
 
 ### 2.4 各版本核心更新点(逐版)
 
-- **v0.1.0**:K3→金融的 4 组件映射落地;275,099 参数;smoke test 8/8 通过(experiments.md EXP001)。
-- **v0.2.0**:全管道消除 NotImplementedError;合成端到端 295.5s 跑通;**健康度自查已警告"回测是样本内的、标准化有 look-ahead 风险"**(PROJECT_REPORT §5)。
-- **v0.3.0(日志义)**:首次真实数据样本外对决;Ridge 0.0285 vs DAFT 0.0252(20 股)——"打不过基线"信号首次出现,但当时口径有缺陷(换手代理、错列特征)。
-- **说明书 v1.0**:K3 评审落实;safe gate 修复;实验登记制度建立(REGISTRY 创建,08-09)。
-- **v0.3.0(代码义)**:**通道契约修复是项目史上最重要的工程事件**——此前全部实验作废;扩池后 Ridge 100 股即达 GO 线(IC 0.0482/t 5.19/Sharpe +0.53),DAFT 进入"有条件 GO"区间。
-- **v0.3.0-research**:周线预注册验证红灯 → 正式 NO-GO;归因完成(路由 +0.018 正贡献 / CDAP、记忆负贡献 / 深度 +0.012 正贡献 / 300 股崩零 / 跨市场不迁移 / g5 截面特征承载信号);Transformer 架构批次启动(暂停)。
+- **v0.1.0（旧规则最早版本）**:K3→金融的 4 组件映射落地;275,099 参数;smoke test 8/8 通过(experiments.md EXP001)。
+- **v0.0.1（旧规则:v0.2.0）**:全管道消除 NotImplementedError;合成端到端 295.5s 跑通;**健康度自查已警告"回测是样本内的、标准化有 look-ahead 风险"**(PROJECT_REPORT §5)。
+- **v0.0.2（旧规则:v0.3.0 日志义）**:首次真实数据样本外对决;Ridge 0.0285 vs DAFT 0.0252(20 股)——"打不过基线"信号首次出现,但当时口径有缺陷(换手代理、错列特征)。
+- **v0.0.3（旧规则:说明书 v1.0）**:K3 评审落实;safe gate 修复;实验登记制度建立(REGISTRY 创建,08-09)。
+- **v0.1.0（旧规则:v0.3.0 代码义）**:**通道契约修复是项目史上最重要的工程事件**——此前全部实验作废;扩池后 Ridge 100 股即达 GO 线(IC 0.0482/t 5.19/Sharpe +0.53),DAFT 进入"有条件 GO"区间。
+- **v0.2.0（旧规则:v0.3.0-research）**:周线预注册验证红灯 → 正式 NO-GO;归因完成(路由 +0.018 正贡献 / CDAP、记忆负贡献 / 深度 +0.012 正贡献 / 300 股崩零 / 跨市场不迁移 / g5 截面特征承载信号);Transformer 架构批次启动(暂停)。
 
 ---
 
@@ -104,7 +104,7 @@ DAFT(Dimension-Aware Financial Trading)在 23 天(2026-07-25 → 2026-08-17)内�
 | M3 | **熵正则两项同式抵消**(K3 评审建议的错误实现) | 路由塌缩(熵→0.000),修复后 IC 反而更低(0.0066 < 塌缩版 0.0251)——修复 bug 反而暴露"塌缩路由恰好是较优解" | 评审建议的实现要有数值验证;此事件也构成重要科学发现(均匀化路由并不更好)(routing-collapse §二;DECISION 阶段2) |
 | M4 | **换手率用代理口径** | 旧 EXP-02 净 Sharpe +0.69(虚高)→ 新口径 −1.10;差点把亏损策略报为盈利 | 成本相关指标必须真实仓位口径(FIX_REPORT §2) |
 | M5 | **n_experts 8/10 漂移三次**(08-07、08-09、08-16 重复同步) | 6 个脚本 forward 崩溃;根因是 build_experts 在 7 个脚本各复制一份 | 单一权威工厂(factory.py)消灭了整类漂移(58dff9d) |
-| M6 | **v0.3.0 版本号双含义**(08-07 日志 vs 08-16 代码) | 版本语义混乱,追溯需人工消歧 | 版本号应单调;日志版本与代码版本分离(见 §五矛盾点 #1) |
+| M6 | **v0.3.0（旧规则版本号）双含义**(08-07 日志 vs 08-16 代码) | 版本语义混乱,追溯需人工消歧 | 版本号应单调;日志版本与代码版本分离(见 §五矛盾点 #1) |
 | M7 | **4 任务 GPU 并行无显存预算** | 物理显存 15.5GB + 共享内存溢出 → **系统蓝屏**,全部在训任务丢失 | 任何并行训练先做显存预算;已机制化为 DAFT_CUDA_FRACTION(UPDATE_LOG §4) |
 | M8 | **--full 加训练量路线**(50/30/20 epochs) | 训练资源投入,OOS IC 0.0251 反低于 quick 0.0368(早停触发,val IC 反降) | "更多训练"不是免费午餐;MLP 在该数据量下过拟合早于收敛(EXP-20260816-11) |
 | M9 | **README 状态滞后** | README 停在 08-16"预判",未反映 08-17 正式 NO-GO | 关键判定结论应同步更新入口文档(本报告 §五 #12) |
@@ -118,19 +118,19 @@ DAFT(Dimension-Aware Financial Trading)在 23 天(2026-07-25 → 2026-08-17)内�
 
 | 版本/变体 | OOS Rank IC | t | 净 Sharpe | 换手 | 口径 | 来源 |
 |---|---|---|---|---|---|---|
-| v0.2.0(合成 50×300) | +0.0203 | —(ICIR 0.140) | −1.79 | — | 合成,样本内回测 | PROJECT_REPORT §3.2 |
-| v0.3.0 日志义(真实 20 股) | +0.0252 | +1.71 | −0.70 | 1.7%(代理) | 错列口径,**已作废** | Learn-new v0.3.0 日志;REGISTRY §3 作废声明 |
-| v0.3.0(30 股 quick) | +0.0077 | +0.51 | −1.66 | 2.37 | 修复后新口径 | FIX_REPORT §2(EXP-03) |
-| v0.3.0(100 股 quick) | +0.0368 | +3.65 | −1.72 | 2.34 | 新口径 | EXP-20260816-06 |
-| v0.3.0(100 股 λ*=0.7) | +0.0274 | +2.36 | −0.60 | 0.98 | 新口径 | EXP-20260816-07 |
-| v0.3.0(100 股 freq5+分数仓位) | +0.0353 | +3.50 | **+0.25** | 0.63 | 新口径,DAFT 唯一净 Sharpe 转正变体 | EXP-20260816-08 |
-| v0.3.0(100 股 --full) | +0.0251 | +2.51 | −1.33 | 2.15 | 新口径 | EXP-20260816-11 |
-| v0.3.0(walk-forward 2 折) | 0.030±0.025 | 1.1~4.6 | −1.09±0.55 | 2.20 | 折间极不稳定 | EXP-20260816-13 |
-| v0.3.0-research(容量 128×4,5 种子) | +0.0315±0.0058 | 最高 4.20 | — | — | 深度 +57% 稳定提升 | RESEARCH_FINDINGS §三 |
-| v0.3.0-research(容量 **256×4**,n=7) | **+0.0394** | +3.74 | — | — | **全项目最高 IC** | RESEARCH_FINDINGS §三 |
-| v0.3.0-research(128×4 锚点 EXP-51) | +0.0331 | +3.11 | −0.886 | 2.18 | 与历史锚点逐位一致 | EXP-20260817-51;UPDATE_LOG §3 |
-| v0.3.0-research(300 股 full) | +0.0002 | — | −4.2 | 2.5 | **规模放大崩零** | RESEARCH_FINDINGS §二 |
-| v0.3.0-research(周线 6 变体) | −0.0229~−0.0023 | −0.14~−1.09 | −2.72~−5.33 | 2.63~2.88 | 全负 | DECISION 阶段5 |
+| v0.0.1（旧规则:v0.2.0）(合成 50×300) | +0.0203 | —(ICIR 0.140) | −1.79 | — | 合成,样本内回测 | PROJECT_REPORT §3.2 |
+| v0.0.2（旧规则:v0.3.0 日志义）(真实 20 股) | +0.0252 | +1.71 | −0.70 | 1.7%(代理) | 错列口径,**已作废** | Learn-new v0.3.0（旧规则）日志;REGISTRY §3 作废声明 |
+| v0.1.0（旧规则:v0.3.0 代码义）(30 股 quick) | +0.0077 | +0.51 | −1.66 | 2.37 | 修复后新口径 | FIX_REPORT §2(EXP-03) |
+| v0.1.0（旧规则:v0.3.0 代码义）(100 股 quick) | +0.0368 | +3.65 | −1.72 | 2.34 | 新口径 | EXP-20260816-06 |
+| v0.1.0（旧规则:v0.3.0 代码义）(100 股 λ*=0.7) | +0.0274 | +2.36 | −0.60 | 0.98 | 新口径 | EXP-20260816-07 |
+| v0.1.0（旧规则:v0.3.0 代码义）(100 股 freq5+分数仓位) | +0.0353 | +3.50 | **+0.25** | 0.63 | 新口径,DAFT 唯一净 Sharpe 转正变体 | EXP-20260816-08 |
+| v0.1.0（旧规则:v0.3.0 代码义）(100 股 --full) | +0.0251 | +2.51 | −1.33 | 2.15 | 新口径 | EXP-20260816-11 |
+| v0.1.0（旧规则:v0.3.0 代码义）(walk-forward 2 折) | 0.030±0.025 | 1.1~4.6 | −1.09±0.55 | 2.20 | 折间极不稳定 | EXP-20260816-13 |
+| v0.2.0（旧规则:v0.3.0-research）(容量 128×4,5 种子) | +0.0315±0.0058 | 最高 4.20 | — | — | 深度 +57% 稳定提升 | RESEARCH_FINDINGS §三 |
+| v0.2.0（旧规则:v0.3.0-research）(容量 **256×4**,n=7) | **+0.0394** | +3.74 | — | — | **全项目最高 IC** | RESEARCH_FINDINGS §三 |
+| v0.2.0（旧规则:v0.3.0-research）(128×4 锚点 EXP-51) | +0.0331 | +3.11 | −0.886 | 2.18 | 与历史锚点逐位一致 | EXP-20260817-51;UPDATE_LOG §3 |
+| v0.2.0（旧规则:v0.3.0-research）(300 股 full) | +0.0002 | — | −4.2 | 2.5 | **规模放大崩零** | RESEARCH_FINDINGS §二 |
+| v0.2.0（旧规则:v0.3.0-research）(周线 6 变体) | −0.0229~−0.0023 | −0.14~−1.09 | −2.72~−5.33 | 2.63~2.88 | 全负 | DECISION 阶段5 |
 
 **纵向结论**:真实信号从"错列虚像"(0.025,作废)到修复后 0.0368,再到容量调优后 0.0394——能力提升是**口径修复 + 池规模 + 容量调参**的产物,而非架构组件(CDAP/记忆)的贡献;净 Sharpe 全程仅一个变体(+0.25)转正,且仍低于 Ridge(+0.53)。
 
@@ -174,16 +174,16 @@ DAFT(Dimension-Aware Financial Trading)在 23 天(2026-07-25 → 2026-08-17)内�
 
 | # | 矛盾 | 采信依据 |
 |---|---|---|
-| 1 | **v0.3.0 双含义**:08-07 样本外对决日志(Learn-new,commit d77b6e0)vs 08-16 工程修复+全面升级(CHANGELOG/SPEC/pyproject) | 以 **pyproject.toml `version="0.3.0"` 与 SPEC 版本表(08-16)** 为代码版本权威;08-07 的"v0.3.0 项目日志"视为文档误用版本号 |
+| 1 | **v0.3.0（旧规则版本号）双含义**:08-07 样本外对决日志(Learn-new,commit d77b6e0)vs 08-16 工程修复+全面升级(CHANGELOG/SPEC/pyproject) | 以 **pyproject.toml `version="0.3.0"（旧规则版本号）` 与 SPEC 版本表(08-16)** 为代码版本权威;08-07 的"v0.3.0 项目日志（旧规则）"视为文档误用版本号 |
 | 2 | n_experts 8→10 在 08-07(`0eda883`)、08-09(`5f5cf5d`)、08-16(FIX_REPORT)重复出现 | 以 FIX_REPORT(08-16)为最终态;前两次同步不完整(残留 8 专家脚本) |
-| 3 | MomentumExpert 归属:SPEC 称"v0.3.0 新增" vs commit `0eda883`(08-07)已同步 | 以 git 时间戳为准:08-07 入仓;SPEC 表述指"10 专家池定型" |
+| 3 | MomentumExpert 归属:SPEC 称"v0.3.0 新增（旧规则:代码义）" vs commit `0eda883`(08-07)已同步 | 以 git 时间戳为准:08-07 入仓;SPEC 表述指"10 专家池定型" |
 | 4 | 测试数:371 / 363 / 368 / 384+1 / 390 / 395+1 / 396 collected 并存 | 按时序取最新:08-17 自检记录 395 passed/1 skipped(SELF_CHECK §四);本次复盘当日实测 **395 passed, 1 skipped**(pytest, D:\env) |
 | 5 | 修复批次提交数:FIX_REPORT"8 个提交" vs commit `fcfa5fc`"10 commits (#9)" | PR #9 为 squash 合并;以 commit 信息"10 commits"为准(FIX_REPORT 列出 8 个主题) |
 | 6 | FIX_REPORT 引用的 8 个修复 hash(5060b9b 等)不在当前 git log(50 提交) | squash 合并后原 hash 消失;以 PR #9 squash 提交 `fcfa5fc` 为准(待核实:或来自另一克隆) |
 | 7 | Ridge 100 股净 Sharpe:+0.53(FIX_REPORT/README)vs +0.56(EXP-12,train 60%)vs +0.555(DECISION/RESEARCH_FINDINGS) | +0.53 与 +0.56 是两种训练窗口径(80% vs 60%);+0.555 为同族数字的另一次登记;报告统一引 +0.53(主口径),差异量级不影响结论 |
 | 8 | 参数量:275,099(experiments/PROJECT_REPORT,8 专家)vs 28.0 万(README 勘误)vs 31.5 万/41.7 万(SPEC,10 专家) | 275,099 是 8 专家时代;勘误值 28.0 万系 8 专家重测;10 专家以 SPEC 31.5 万/41.7 万为准 |
 | 9 | 200 维构成:guided-tour 45+35+40+20+30+30 vs Learn-new 55+40+30+35+30+10 vs SPEC "6 组各~33+FFT~35" | 以代码 feature 分组(特征消融实测 g1:0-45 等,RESEARCH_FINDINGS §五)为准;文档分组系不同版本快照 |
-| 10 | "213 因子"(Learn-new v0.3.0 日志)vs README 勘误"注册表仅 35 个且未接入" | 以勘误为准(213 系早期误述) |
+| 10 | "213 因子"(Learn-new v0.3.0 日志（旧规则）)vs README 勘误"注册表仅 35 个且未接入" | 以勘误为准(213 系早期误述) |
 | 11 | AHM:experiments EXP001"95% fast-path" vs SPEC/README"研究性实现,默认禁用,60-80% 延迟声称暂不成立" | 以后者(08-16 注记)为准;前者为雏形期演示数字 |
 | 12 | README 停于 08-16"预判" vs DECISION/ROADMAP 08-17"正式 NO-GO" | 以 DECISION(定稿 08-17)为准;README 待同步 |
 | 13 | DECISION_20260930.md 文件名(截止日)vs 内容定稿日 08-17 | 以 git commit `14b8767`(08-17)与文档状态行为准;文件名取预注册截止日 |

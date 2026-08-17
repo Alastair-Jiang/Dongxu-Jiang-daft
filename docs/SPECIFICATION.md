@@ -2,7 +2,7 @@
 
 > **Dimension-Aware Financial Trading**
 > 面向中频量化交易的跨维度注意力架构
-> Version **v0.3.0** · 2026-08-16
+> Version **v0.1.0（旧规则:v0.3.0 代码义）** · 2026-08-16
 
 ---
 
@@ -10,17 +10,17 @@
 
 | 版本 | 日期 | 里程碑 |
 |------|------|--------|
-| v0.1.0 | 2026-07 | 核心架构（MoE 专家池 + Regime Router + KDA Memory + CDAP + AHM） |
-| v0.2.0 | 2026-08-06/07 | 全管道打通，消除所有 `NotImplementedError` |
-| **v0.3.0** | **2026-08-16** | **工程修复(PR #9) + 全面升级**：通道契约/口径统一/10 专家、工厂去重、涨跌停 mask、hs300 成分股池、交易制度约束 |
+| v0.1.0（旧规则最早版本） | 2026-07 | 核心架构（MoE 专家池 + Regime Router + KDA Memory + CDAP + AHM） |
+| v0.0.1（旧规则:v0.2.0） | 2026-08-06/07 | 全管道打通，消除所有 `NotImplementedError` |
+| **v0.1.0（旧规则:v0.3.0 代码义）** | **2026-08-16** | **工程修复(PR #9) + 全面升级**：通道契约/口径统一/10 专家、工厂去重、涨跌停 mask、hs300 成分股池、交易制度约束 |
 
-> v0.3.0 是一次**工程修复 + A 股口径升级**，不含架构变更。修复批次（PR #9）
+> v0.1.0（旧规则:v0.3.0 代码义） 是一次**工程修复 + A 股口径升级**，不含架构变更。修复批次（PR #9）
 > 修正了早期实现与文档的多处出入——最严重的是**数据通道错列**（数据源的
 > OHLCV 被特征引擎当作基础特征读取），此前所有实验的 s_t 都建立在错列之上。
 > 全面升级进一步补齐 A 股交易制度（涨跌停 mask、T+1 成交约束、调仓频率与
 > 分数仓位）、把股票池从 50 只内置样本升级到 hs300 真实成分（`--universe hs300`，
 > 按 start 日拉取、解除 50 只上限并缓解幸存者偏差），并完成扩池重测与稳健性
-> 验证。本说明书以 v0.3.0 的真实实现为准。
+> 验证。本说明书以 v0.1.0（旧规则:v0.3.0 代码义） 的真实实现为准。
 
 ---
 
@@ -230,7 +230,7 @@ class Panel:
 A 股口径下，mask 由两部分合成：`close` 有效性（NaN → 停牌/缺失，置 False）与
 涨跌停检测（`_limit_move_mask`，见 4.6）。
 
-### 4.2 通道契约（v0.3.0 修复 ★ 关键）
+### 4.2 通道契约（v0.1.0（旧规则:v0.3.0 代码义） 修复 ★ 关键）
 
 数据源与特征引擎之间存在**两种不同的通道布局**，历史上被直接混用，导致特征错列：
 
@@ -242,7 +242,7 @@ A 股口径下，mask 由两部分合成：`close` 有效性（NaN → 停牌/�
     ["close", "log_return", "volume", "volume_ratio", "volatility_20"]  ← 基础布局
 ```
 
-**v0.3.0 修复**：新增 `src/daft/features/base_features.py` 作为**唯一转换点**，
+**v0.1.0（旧规则:v0.3.0 代码义） 修复**：新增 `src/daft/features/base_features.py` 作为**唯一转换点**，
 所有特征引擎入口必须首先调用 `ensure_base_panel`：
 
 ```python
@@ -288,7 +288,7 @@ panel = loader.load()
 S_t = S_{t-1} · exp(μΔt + σ√Δt · ε_t),  ε_t ~ N(0,1)
 ```
 
-### 4.6 A 股口径升级（v0.3.0 新增）
+### 4.6 A 股口径升级（v0.1.0（旧规则:v0.3.0 代码义） 新增）
 
 #### 4.6.1 涨跌停 mask
 
@@ -307,7 +307,7 @@ A 股有涨跌停制度（主板 ±10%，创业板 300/301 与科创板 688 ±20
 #### 4.6.2 hs300 真实成分股池
 
 早期实验用内置 50 只静态样本，既有人工上限（截面太小、权重股同质），也有
-幸存者偏差。v0.3.0 各运行脚本新增 `--universe hs300`（默认），按 `start` 日
+幸存者偏差。v0.1.0（旧规则:v0.3.0 代码义） 各运行脚本新增 `--universe hs300`（默认），按 `start` 日
 拉取真实沪深 300 成分股，解除 50 只上限并缓解幸存者偏差：
 
 ```bash
@@ -341,7 +341,7 @@ Panel(T×N×F)
     s_t ∈ R^200  市场状态向量
 ```
 
-> **重要澄清（v0.3.0）**：手工因子注册表为 **35 个**（非早期文档的 213）；
+> **重要澄清（v0.1.0（旧规则:v0.3.0 代码义））**：手工因子注册表为 **35 个**（非早期文档的 213）；
 > 且 legacy 因子与 FFT 特征**当前未接入**任何训练/评估管线。200 维 s_t
 > 全部由 `RegimeFeatureExtractor` 从基础特征派生。
 
@@ -370,7 +370,7 @@ FFT(signal) → 功率谱
     └── 高频段 (短期波动)   → mean/power + noise ratio
 ```
 
-> 当前为独立模块，**未接入**训练/评估管线（v0.3.0 澄清）。
+> 当前为独立模块，**未接入**训练/评估管线（v0.1.0（旧规则:v0.3.0 代码义） 澄清）。
 
 ### 5.4 RegimeFeatureExtractor — 市场状态向量
 
@@ -396,7 +396,7 @@ FFT(signal) → 功率谱
 - 流动性因子（成交量变化模式）
 - 时间序列算子组合（rank, ts_mean, ts_std, corr 等组合）
 
-所有因子通过 `LegacyFactorRegistry` 统一管理。> 当前为独立模块，**未接入**训练/评估管线（v0.3.0 澄清）。
+所有因子通过 `LegacyFactorRegistry` 统一管理。> 当前为独立模块，**未接入**训练/评估管线（v0.1.0（旧规则:v0.3.0 代码义） 澄清）。
 
 ---
 
@@ -565,7 +565,7 @@ j = e ⊙ m ⊙ d   ∈ R^64
 | → Memory | g_t = σ(W^memory_out · j) ∈ (0,1)^{128} | 额外遗忘门调制 |
 | → Depth | w_t = softmax(W^depth_out · j) ∈ Δ² | 跨层特征检索权重 |
 
-> **v0.3.0 修正**：路由调制在 **logit 空间**进行（`softmax(log p + δ·bias)`），
+> **v0.1.0（旧规则:v0.3.0 代码义） 修正**：路由调制在 **logit 空间**进行（`softmax(log p + δ·bias)`），
 > 保证零调制（δ=0 或 j=0）时严格无扰动——旧实现直接在概率空间加偏置，
 > 初始化即扭曲路由。
 
@@ -642,7 +642,7 @@ if H(p_recent) > λ_entropy × H_baseline:
 
 #### 6.4.3 当前状态
 
-> **v0.3.0 澄清**：AHM 为**研究性实现，默认禁用**。`ExpertEnsemble` 的
+> **v0.1.0（旧规则:v0.3.0 代码义） 澄清**：AHM 为**研究性实现，默认禁用**。`ExpertEnsemble` 的
 > `use_hardening` 参数默认 `False`。硬化快路径的完整接线（`detect_regime_shift`、
 > `evict` 在生产管线中的调用）尚未完成，见附录 C 待办。
 
@@ -678,7 +678,7 @@ class BaseExpert(nn.Module):
 | **EventExpert** | 2 | 48 | 全部数据（兜底） | BCE on return direction |
 | **MomentumExpert** | 2 | 64 | 20日截面动量显著非零 | Direction-weighted MSE（方向错 ×8） |
 
-**MomentumExpert（v0.3.0 新增）**：专注**截面动量** regime，与纯趋势跟踪区分——
+**MomentumExpert（v0.1.0（旧规则:v0.3.0 代码义） 新增）**：专注**截面动量** regime，与纯趋势跟踪区分——
 趋势专家捕捉方向性 ADX 过滤运动，动量专家捕捉"赢家恒赢"的截面持续性
 （20 日形成期横截面动量显著非零，且 top/bottom decile 价差拉大）。
 研究依据：Chichernea et al. (JFE 2021) 论证动量与反转是**独立的、regime 依赖**
@@ -726,10 +726,10 @@ class ExpertEnsemble(nn.Module):
 | `val` | τ=1.0, noisy gating OFF | 完整计算 | 不使用 | 不跟踪 |
 | `inference` | τ=0.1, noisy gating OFF | 先查缓存 | 按需使用 | 不跟踪 |
 
-### 8.3 模型工厂 factory.py（v0.3.0 新增）
+### 8.3 模型工厂 factory.py（v0.1.0（旧规则:v0.3.0 代码义） 新增）
 
 历史上 `build_experts` / `build_ensemble` / `build_layer_proj` 在 7 个脚本里
-各复制一份，**n_experts 8 vs 10 的 forward 崩溃正是这样漂出来的**。v0.3.0
+各复制一份，**n_experts 8 vs 10 的 forward 崩溃正是这样漂出来的**。v0.1.0（旧规则:v0.3.0 代码义）
 新增 `src/daft/models/factory.py` 提供单一权威入口：
 
 ```python
@@ -834,7 +834,7 @@ engine = BacktestEngine(config={
     "top_quantile": 0.2,
     "long_only": True,
     "annualization": 252,
-    "rebalance_freq": 1,            # 调仓频率（v0.3.0）
+    "rebalance_freq": 1,            # 调仓频率（v0.1.0（旧规则:v0.3.0 代码义））
     "weight_mode": "equal",         # equal | signal_zscore（分数仓位）
     "signal_smoothing": 0.0,        # EMA 平滑系数 λ（0=不启用）
     "respect_mask_no_trade": True,  # 成交约束（停牌/涨跌停日禁开平仓）
@@ -849,14 +849,14 @@ results = engine.run(signals, returns, panel, mask=panel.mask)
 long_only=False 时: bottom_quantile 等权做空
 ```
 
-**仓位模式（v0.3.0 新增）**：`weight_mode` 决定候选股内部的权重分配：
+**仓位模式（v0.1.0（旧规则:v0.3.0 代码义） 新增）**：`weight_mode` 决定候选股内部的权重分配：
 
 | 模式 | 说明 |
 |------|------|
 | `equal` | top-k 候选等权（原行为） |
 | `signal_zscore` | 按信号 z 分数加权（候选内），信号越强仓位越重 |
 
-### 11.3 交易制度约束（v0.3.0 新增）
+### 11.3 交易制度约束（v0.1.0（旧规则:v0.3.0 代码义） 新增）
 
 A 股的两条硬约束在回测层落实：
 
@@ -867,7 +867,7 @@ A 股的两条硬约束在回测层落实：
    不计换手与成本。信号选择阶段已把 masked 资产排除在建仓之外；此处补齐
    "已持仓资产在跌停日卖不掉"这一半。
 
-**调仓频率（v0.3.0 新增）**：`rebalance_freq` 控制每 N 根 bar 才换一次仓，
+**调仓频率（v0.1.0（旧规则:v0.3.0 代码义） 新增）**：`rebalance_freq` 控制每 N 根 bar 才换一次仓，
 其间持仓不变、成本只在换仓日计提。实验 EXP-20260816-08 显示降频（freq=5）
 比信号平滑更有效地压换手且不衰减 IC（见第 13 章）。
 
@@ -893,7 +893,7 @@ A 股的两条硬约束在回测层落实：
 | **Hit Rate** | P(sign(signal) = sign(return)) | 方向准确率 |
 | **Turnover** | mean(\|Δw\|) | 真实仓位换手 |
 
-> **v0.3.0 修正**：IC 对齐统一为 **k→k+1**（signal[t] 预测 p[t+1]−p[t]）；
+> **v0.1.0（旧规则:v0.3.0 代码义） 修正**：IC 对齐统一为 **k→k+1**（signal[t] 预测 p[t+1]−p[t]）；
 > val-IC 为**逐时步截面 rank IC**（旧为 pooled Pearson，ICIR/t-stat 退化）；
 > 回测换手率为**真实仓位换手**；MaxDD 为**净值百分比**回撤。
 
@@ -901,7 +901,7 @@ A 股的两条硬约束在回测层落实：
 
 ## 12. 配置系统
 
-> **v0.3.0 澄清**：`configs/*.yaml` 为**参考死配置**，未接入运行脚本。
+> **v0.1.0（旧规则:v0.3.0 代码义） 澄清**：`configs/*.yaml` 为**参考死配置**，未接入运行脚本。
 > 实际配置在各脚本的 `DEFAULT_CONFIG` 字典中。修改参数请直接改脚本内的
 > `DEFAULT_CONFIG`，或后续将 yaml 接线（见附录 C 待办）。
 
@@ -1017,7 +1017,7 @@ class MyRouter(RegimeRouter):
 | Stage3 epochs / LR | 10 / 1e-5 | 联合微调 |
 | Stage4 n_steps | 200 | 硬化收集 |
 | CDAP warmup | 3 epochs | scale 预热 |
-| sparsity_weight | 0.01 | 熵正则权重（v0.3.0 从 0.05 调低） |
+| sparsity_weight | 0.01 | 熵正则权重（v0.1.0（旧规则:v0.3.0 代码义） 从 0.05 调低） |
 
 ### A.3 回测参数
 
@@ -1042,7 +1042,7 @@ daft/
 ├── docs/
 │   ├── SPECIFICATION.md              # ★ 本文档 — 技术说明书
 │   ├── guided-tour.md                # 代码走读导览
-│   ├── FIX_REPORT_20260816.md        # v0.3.0 修复与重验报告
+│   ├── FIX_REPORT_20260816.md        # v0.1.0（旧规则:v0.3.0 代码义） 修复与重验报告
 │   ├── EXPERIMENT_REGISTRY.md        # 实验登记 & 预注册判据
 │   ├── ROADMAP.md                    # 路线图与挂起项
 │   ├── PROJECT_EVALUATION.md         # 项目评判评分卡
@@ -1072,14 +1072,14 @@ daft/
 │   │   ├── cross_dim_attn.py         # [C3] CDAP
 │   │   ├── hardening.py              # [C4] AHM
 │   │   ├── ensemble.py               # ExpertEnsemble
-│   │   ├── factory.py                # ★ 模型工厂（v0.3.0 新增）
+│   │   ├── factory.py                # ★ 模型工厂（v0.1.0（旧规则:v0.3.0 代码义） 新增）
 │   │   └── experts/                  # 5 类专家
 │   │       ├── base_expert.py
 │   │       ├── trend_expert.py
 │   │       ├── reversal_expert.py
 │   │       ├── volatility_expert.py
 │   │       ├── event_expert.py
-│   │       └── momentum_expert.py    # ★ v0.3.0 新增
+│   │       └── momentum_expert.py    # ★ v0.1.0（旧规则:v0.3.0 代码义） 新增
 │   │
 │   ├── training/
 │   │   ├── expert_trainer.py         # Stage 1
@@ -1115,7 +1115,7 @@ daft/
    不参与训练/评估。需接入或明确其定位。
 
 5. **residual-gate-port 分支挂起** — `feat/residual-gate-port`（记忆门收缩先验
-   CP1-CP11）的数学推理部分与 v0.3.0 CDAP logit 空间修复冲突。**决策：挂起，
+   CP1-CP11）的数学推理部分与 v0.1.0（旧规则:v0.3.0 代码义） CDAP logit 空间修复冲突。**决策：挂起，
    不移植**，数学实现保留不动；移植条件是 M5 判定为 GO 或有条件 GO 后按新架构
    重做。
 
@@ -1125,8 +1125,8 @@ daft/
   通过修复 safe_gate 与 route_modulate 的梯度断路解决。
 - **通道契约错列** — 2026-08-16 通过 base_features.py::ensure_base_panel 解决。
 - **n_experts 不一致崩溃** — 2026-08-16 通过 factory.py 单一入口 + 一致性 assert 解决。
-- **涨跌停 mask + hs300 成分股池** — 2026-08-16（v0.3.0），见 4.6。
-- **交易制度约束（T+1 / 成交约束 / 调仓频率 / 分数仓位）** — 2026-08-16（v0.3.0），见 11.3。
+- **涨跌停 mask + hs300 成分股池** — 2026-08-16（v0.1.0（旧规则:v0.3.0 代码义）），见 4.6。
+- **交易制度约束（T+1 / 成交约束 / 调仓频率 / 分数仓位）** — 2026-08-16（v0.1.0（旧规则:v0.3.0 代码义）），见 11.3。
 
 ### C.3 待实现功能
 
@@ -1152,5 +1152,5 @@ daft/
 > **DAFT: Dimension-Aware Financial Trading**
 > Author: Alastair (Dongxu Jiang)
 > GitHub: [github.com/Alastair-Jiang/Dongxu-Jiang-daft](https://github.com/Alastair-Jiang/Dongxu-Jiang-daft)
-> Version: v0.3.0 · License: MIT
+> Version: v0.1.0（旧规则:v0.3.0 代码义） · License: MIT
 > Inspired by Kimi K3 (Moonshot AI, July 2026)

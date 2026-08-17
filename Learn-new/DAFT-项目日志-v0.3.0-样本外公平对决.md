@@ -1,10 +1,10 @@
-# DAFT Project Log — v0.3.0
+# DAFT Project Log — v0.0.2（旧规则:v0.3.0 日志义）
 
 **Baseline & Out-of-Sample Evaluation: DAFT vs. Ridge on Real A-Share Data**
 
 | | |
 |---|---|
-| **Version** | v0.3.0 (2026-08-07) |
+| **Version** | v0.0.2（旧规则:v0.3.0 日志义） (2026-08-07) |
 | **Repository** | [github.com/Alastair-Jiang/Dongxu-Jiang-daft](https://github.com/Alastair-Jiang/Dongxu-Jiang-daft) |
 | **Milestone** | First strict out-of-sample comparison of the full DAFT pipeline against a linear baseline on real Chinese A-share data |
 | **License** | MIT |
@@ -17,7 +17,7 @@ Two additions move DAFT from "architecture demonstration" toward "empirically ac
 
 1. **A baseline and an evaluation discipline.** `scripts/run_baseline_ridge.py` and `scripts/run_baseline_ridge_real.py` implement a ridge-regression baseline (200 features, 200 parameters) evaluated under strict out-of-sample rules: chronological train/val/test split, normalization statistics fitted on the training segment only, transaction costs applied.
 
-2. **An out-of-sample version of the full DAFT pipeline.** `scripts/run_full_pipeline_oos.py` + `scripts/run_oos_backtest_only.py` run the complete DAFT training protocol (Stage 1 experts → Stage 2 router/memory/CDAP → Stage 3 joint fine-tuning) **without ever exposing the test segment to training**, with causal memory warm-up and train-only normalization. This closes the in-sample-evaluation gap identified in the v0.2.0 review.
+2. **An out-of-sample version of the full DAFT pipeline.** `scripts/run_full_pipeline_oos.py` + `scripts/run_oos_backtest_only.py` run the complete DAFT training protocol (Stage 1 experts → Stage 2 router/memory/CDAP → Stage 3 joint fine-tuning) **without ever exposing the test segment to training**, with causal memory warm-up and train-only normalization. This closes the in-sample-evaluation gap identified in the v0.0.1 review（旧规则:v0.2.0）.
 
 ### New scripts
 ```
