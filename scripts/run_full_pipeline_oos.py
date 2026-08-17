@@ -106,6 +106,8 @@ def main():
                         help="专家 hidden 维度(容量扫描, 默认 64)")
     parser.add_argument("--n-layers", type=int, default=2,
                         help="专家 MLP 层数(容量扫描, 默认 2)")
+    parser.add_argument("--no-regime", action="store_true",
+                        help="Stage1 专家全量训练(README regime 专业化对照)")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -159,7 +161,8 @@ def main():
     t0 = time.time()
     s1_hist = s1.train_all(epochs=cfg["stage1"]["epochs"],
                            batch_size=cfg["stage1"]["batch_size"],
-                           lr=cfg["stage1"]["lr"], verbose=True)
+                           lr=cfg["stage1"]["lr"], verbose=False,
+                           use_regime=not args.no_regime)
     stage1_seconds = time.time() - t0
     print(f"      Stage 1 耗时: {stage1_seconds:.1f}s")
 
@@ -242,6 +245,7 @@ def main():
         "seed": args.seed,
         "hidden": args.hidden,
         "n_layers": args.n_layers,
+        "stage1_regime": not args.no_regime,
         "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,

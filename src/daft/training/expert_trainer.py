@@ -213,22 +213,27 @@ class Stage1ExpertTrainer:
         weight_decay: float = 1e-5,
         early_stop_patience: int = 10,
         verbose: bool = True,
+        use_regime: bool = True,
     ) -> Dict[str, List[float]]:
         """Train all 8 experts independently.
 
-        Returns
-        -------
-        histories : dict  { "expert_0_trend": [val_loss, ...], ... }
+        use_regime=False → 每个专家用全部数据训练(README regime 专业化对照,
+        2026-08-17 研究实验)。
         """
         histories: Dict[str, List[float]] = {}
 
         for i, expert in enumerate(self.experts):
-            regime_label = self.EXPERT_REGIME_GROUP[i]
-            regime_mask  = self.regime_masks[regime_label]
-            n_samples    = regime_mask.sum().item()
+            if use_regime:
+                regime_label = self.EXPERT_REGIME_GROUP[i]
+                regime_mask = self.regime_masks[regime_label]
+                tag = regime_label
+            else:
+                regime_mask = torch.ones_like(self.targets, dtype=torch.bool)
+                tag = "all"
+            n_samples = regime_mask.sum().item()
 
             if verbose:
-                print(f"\n--- Expert [{i}] {expert.name} ({regime_label}) "
+                print(f"\n--- Expert [{i}] {expert.name} ({tag}) "
                       f"— {n_samples:,} samples ---")
 
             if n_samples < batch_size:
