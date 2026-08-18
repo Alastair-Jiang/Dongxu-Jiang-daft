@@ -120,10 +120,15 @@ class RouterTrainer:
         # --- Train / val loaders (no shuffle — memory is stateful) ---
         # 按日对齐批次(2026-08-16): 每批覆盖整数个交易日, 记忆行与资产保持
         # 对应, 修复展平数据流破坏 KDA 时序语义(M_t=f(M_{t-1},s_t))的问题。
+        # A3 (2026-08-18): 进一步收紧为**每批恰一个时间步**(B=N)——展平行
+        # 不再按 mask 删除, 记忆第 b 行严格对应资产 b, 与 OOS 推理的
+        # "记忆行=固定资产列"语义一致(方向①: 按资产对齐记忆行)。
         N_stocks = train_panel.N
-        eff_batch = max(N_stocks, (batch_size // N_stocks) * N_stocks)
+        eff_batch = N_stocks
         train_ds = TensorDataset(train_s, train_t, train_m, train_tidx)
         val_ds = TensorDataset(val_s, val_t, val_m, val_tidx)
+        # 注: train/val 面板来自同一 Panel 的时序切片, N 相同;
+        # 若未来 N 不同需按各自段分别对齐(此处沿用既有约定)。
         train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=False)
         val_loader = DataLoader(val_ds, batch_size=eff_batch, shuffle=False)
 
@@ -165,14 +170,17 @@ class RouterTrainer:
             # ---- Validate ----
             self.model.eval()
             self.layer_proj.eval()
-            val_loss, val_signals, val_targets, val_tidx_c = self._run_epoch(
+            val_loss, val_signals, val_targets, val_tidx_c, val_mask_c = self._run_epoch(
                 val_loader, None, False, return_predictions=True,
             )
 
             # 逐时步截面 rank IC (2026-08-16 修复): 旧实现把展平样本
             # 池化成单个 Pearson 相关, ICIR/t-stat 恒等于 IC 本身(退化)。
+            # A3 (2026-08-18): 掩码行不再被预删除, IC 必须经 mask 过滤——
+            # 停牌/涨跌停行的信号与目标都不参与截面 IC。
             val_ic = rank_ic_by_timestep(
                 val_signals.squeeze(-1), val_targets.squeeze(-1), val_tidx_c,
+                mask=val_mask_c,
             )
             val_ic_summary = ic_summary(val_ic) if val_ic.numel() > 0 else {
                 "ic_mean": 0.0, "ic_std": 0.0, "icir": 0.0,
@@ -229,6 +237,10 @@ class RouterTrainer:
         Returns (s_2d, t_1d, m_1d, t_idx): 展平样本 + 每个样本的原始
         时间步索引(用于逐时步截面 IC, 2026-08-16 修复)。
 
+        A3 (2026-08-18): 掩码行**不再删除**，保持 (T-1)*N 完整网格——
+        记忆行与资产列的对齐由模型内 mask 门控完成(见 memory.py)，
+        损失/IC 统计则只对有效行计算(见 _run_epoch)。
+
         norm_stats : (mean, std) 或 None (A2 修复, 2026-08-18)
             None → 从当前段拟合并记录到 self.norm_stats(训练段用法);
             给定 → 复用该统计量且**不**覆盖 self.norm_stats(val 段用法,
@@ -266,13 +278,9 @@ class RouterTrainer:
         # 时间步索引: 展平后第 r 行的原始 t = r // N
         t_idx = torch.arange(T, device=s_2d.device).repeat_interleave(N)
 
-        # Drop masked-out samples
-        valid = m_1d.squeeze(-1)
-        if valid.any():
-            s_2d = s_2d[valid]
-            t_1d = t_1d[valid]
-            m_1d = m_1d[valid]
-            t_idx = t_idx[valid]
+        # A3 (2026-08-18): 不再按 mask 删除行——保持 (T*N) 网格, 使
+        # DataLoader 每批(=N 行)恰为一个时间步的完整截面, 记忆行=资产列。
+        # 掩码行的"跳过"语义由模型内 mask 门控承担(memory.py A3)。
 
         return s_2d, t_1d, m_1d, t_idx
 
@@ -293,7 +301,7 @@ class RouterTrainer:
         -------
         avg_loss : float
         avg_entropy : float (training only) OR
-        signals, targets, t_idx : (return_predictions mode)
+        signals, targets, t_idx, mask : (return_predictions mode, A3 增补 mask)
         """
         total_loss = 0.0
         total_entropy = 0.0
@@ -302,6 +310,7 @@ class RouterTrainer:
         all_signals = []
         all_targets = []
         all_tidx = []
+        all_masks = []   # A3: 逐行掩码, 供 val-IC 只统计有效行
 
         # Reset memory at epoch start
         self.model.memory.reset_state(1, self.device)
@@ -316,6 +325,16 @@ class RouterTrainer:
             if self.model.memory.M is None or self.model.memory.M.size(0) != B:
                 self.model.memory.reset_state(B, self.device)
 
+            # A3: 整批皆不可交易(全线停牌, 罕见)时跳过——无有效损失信号,
+            # 且避免负载均衡 KL 在 current_frac→0 时发散
+            if m_b.sum() == 0:
+                self.model.memory.detach_state()
+                continue
+
+            # A3: 有效行权重(修复前是"先删行再统计", 此处等价改写)
+            mk_1d = m_b.float().reshape(-1)                  # (B,)
+            mk_den = mk_1d.sum().clamp(min=1.0)             # 有效行数
+
             # --- Build layer outputs ---
             l0 = self.layer_proj["l0"](s_b)  # (B, d_v)
             l1 = self.layer_proj["l1"](s_b)
@@ -324,7 +343,7 @@ class RouterTrainer:
 
             if training:
                 # --- Full forward pass ---
-                outputs = self.model(s_b, layer_outputs, mode="train")
+                outputs = self.model(s_b, layer_outputs, mode="train", mask=m_b)
                 routing_probs = outputs["routing_probs"]   # (B, n_experts)
 
                 # --- Per-expert losses (no-grad through experts) ---
@@ -350,7 +369,7 @@ class RouterTrainer:
                 # 由于 loss_i 是标量, 数学上 Σ_b Σ_i p_{b,i}·loss_i = Σ_i loss_i·Σ_b p_{b,i},
                 # 与 routing_mean 方案在期望上等价, 但我们需要的是 per-sample 稀疏,
                 # 因此改在熵正则端加强: 对每个样本的分布施加稀疏惩罚(见下)。
-                routing_mean = routing_probs.mean(dim=0)    # (n_experts,)
+                routing_mean = (routing_probs * mk_1d.unsqueeze(-1)).sum(dim=0) / mk_den
                 weighted_loss = sum(
                     routing_mean[i] * expert_losses[i]
                     for i in range(self.model.n_experts)
@@ -362,15 +381,18 @@ class RouterTrainer:
                 # 改为 Switch Transformer 风格的负载均衡损失 —— 基于专家使用
                 # 频率 current_frac 的 KL(uniform || current_frac), 鼓励每个专家
                 # 都被用到(防坍缩到单一专家), 不再有 per-sample 熵惩罚(防过度 one-hot)。
+                # A3: 频率统计只对有效行(与修复前删行后统计的口径一致)。
                 n_experts = self.model.n_experts
-                current_frac = routing_probs.mean(dim=0)          # (n_experts,)
+                current_frac = (routing_probs * mk_1d.unsqueeze(-1)).sum(dim=0) / mk_den
                 current_frac = current_frac.clamp(min=1e-8)
                 target_frac = 1.0 / n_experts
                 balance_loss = (target_frac * (target_frac / current_frac).log()).sum()
 
                 # 路由熵仅作监控指标(不参与损失), 用于验证 0.5~1.5 区间
-                routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
-                                    ).sum(dim=-1).mean()
+                # A3: 同样只对有效行平均
+                routing_entropy = -(
+                    (routing_probs * (routing_probs + 1e-8).log()).sum(dim=-1) * mk_1d
+                ).sum() / mk_den
 
                 loss = weighted_loss + balance_weight * balance_loss
 
@@ -394,7 +416,7 @@ class RouterTrainer:
 
             else:
                 with torch.no_grad():
-                    outputs = self.model(s_b, layer_outputs, mode="val")
+                    outputs = self.model(s_b, layer_outputs, mode="val", mask=m_b)
                     routing_probs = outputs["routing_probs"]
                     signal = outputs["signal"]
 
@@ -405,7 +427,8 @@ class RouterTrainer:
                         loss_i = expert.compute_loss(pred_i, t_b, m_b)
                         expert_losses.append(loss_i)
 
-                    routing_mean = routing_probs.mean(dim=0)
+                    # A3: 路由均值只对有效行
+                    routing_mean = (routing_probs * mk_1d.unsqueeze(-1)).sum(dim=0) / mk_den
                     weighted_loss = sum(
                         routing_mean[i] * expert_losses[i]
                         for i in range(self.model.n_experts)
@@ -416,6 +439,7 @@ class RouterTrainer:
                     all_signals.append(signal.cpu())
                     all_targets.append(t_b.cpu())
                     all_tidx.append(ti_b.cpu())
+                    all_masks.append(m_b.cpu())
 
             # Detach memory to limit BPTT
             self.model.memory.detach_state()
@@ -428,7 +452,8 @@ class RouterTrainer:
             signals = torch.cat(all_signals, dim=0) if all_signals else torch.zeros(0, 1)
             targets = torch.cat(all_targets, dim=0) if all_targets else torch.zeros(0, 1)
             t_idx = torch.cat(all_tidx, dim=0) if all_tidx else torch.zeros(0, dtype=torch.long)
-            return avg_loss, signals, targets, t_idx
+            masks = torch.cat(all_masks, dim=0) if all_masks else torch.ones(0, 1, dtype=torch.bool)
+            return avg_loss, signals, targets, t_idx, masks
 
         return avg_loss, avg_entropy
 

@@ -53,7 +53,8 @@ for t in range(T - 1):
     l1 = layer_proj["l1"](s_b)
     l2 = layer_proj["l2"](s_b)
     with torch.no_grad():
-        out = model(s_b, [l0, l1, l2], mode="inference")
+        out = model(s_b, [l0, l1, l2], mode="inference",
+                    mask=panel.mask[t].to(device))  # A3: 记忆行语义对齐
         signals[t] = out["signal"].squeeze(-1).cpu()
     model.memory.detach_state()
 

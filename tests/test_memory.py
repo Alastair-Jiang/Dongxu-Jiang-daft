@@ -271,3 +271,79 @@ class TestRMSNorm:
         x = torch.zeros(4, 64)
         y = KDAMarketMemory._rms_norm(x)
         assert y.isfinite().all()  # no NaN from div-by-zero
+
+
+# ── A3 (2026-08-18): 记忆行语义 —— mask 门控 ─────────────────────────────
+# K3 纲领 A3: 训练/推理的记忆行语义必须一致。方向① "按资产对齐记忆行
+# (不删行, mask 进权重)" 的模型侧守卫: mask=0 行(停牌/涨跌停)
+# 完全跳过记忆更新(α→1, β→0 ⇒ M 逐位不变)且检索置零。
+
+
+class TestA3MaskSemantics:
+    @staticmethod
+    def _warm(memory, B=4, seed=7):
+        """先走一步建立非零记忆状态。"""
+        torch.manual_seed(seed)
+        memory.reset_state(B, torch.device("cpu"))
+        memory(torch.randn(B, D_FEATURE))
+
+    def test_mask_zero_rows_skip_memory_update(self, memory):
+        """mask=0 行记忆逐位不变(α=1, β=0 的 IEEE 精确性); mask=1 行正常更新。"""
+        self._warm(memory)
+        M_before = memory.M.clone()
+
+        torch.manual_seed(11)
+        s_t = torch.randn(4, D_FEATURE)
+        mask = torch.tensor([True, False, True, False])
+        _, M_after = memory(s_t, mask=mask)
+
+        # mask=0 行: 逐位严格不变
+        assert torch.equal(M_after[1], M_before[1])
+        assert torch.equal(M_after[3], M_before[3])
+        # mask=1 行: α<1 有衰减, 记忆必须改变
+        assert not torch.equal(M_after[0], M_before[0])
+        assert not torch.equal(M_after[2], M_before[2])
+
+    def test_mask_zero_rows_retrieved_zero(self, memory):
+        """mask=0 行检索输出置零, 不贡献信号。"""
+        self._warm(memory)
+        torch.manual_seed(13)
+        s_t = torch.randn(4, D_FEATURE)
+        mask = torch.tensor([1.0, 0.0, 1.0, 1.0])
+        retrieved, _ = memory(s_t, mask=mask)
+        assert torch.equal(retrieved[1], torch.zeros(D_V))
+        assert retrieved[0].abs().sum() > 0  # mask=1 行正常检索
+
+    def test_mask_shapes_1d_2d_equivalent(self, memory):
+        """(B,) 与 (B,1) 两种 mask 形状等价。"""
+        torch.manual_seed(17)
+        s_t = torch.randn(4, D_FEATURE)
+        mask_1d = torch.tensor([True, True, False, True])
+
+        r1, M1 = memory(s_t.clone(), mask=mask_1d, reset=True)
+        r2, M2 = memory(s_t.clone(), mask=mask_1d.unsqueeze(-1), reset=True)
+        assert torch.allclose(r1, r2, atol=1e-6)
+        assert torch.allclose(M1, M2, atol=1e-6)
+
+    def test_mask_none_keeps_legacy_path(self, memory):
+        """mask=None 时行为与修复前完全一致(外部调用向后兼容)。"""
+        torch.manual_seed(19)
+        s_t = torch.randn(4, D_FEATURE)
+        retrieved, M = memory(s_t, mask=None)
+        assert retrieved.shape == (4, D_V)
+        assert M.shape == (4, D_K, D_V)
+        assert retrieved.isfinite().all()
+
+    def test_mask_float_zero_rows_nonzero_mask_update_equivalent(self, memory):
+        """混合 0/1 float mask 等价于全 1 mask 跳过被删行——行语义守卫的
+        数值抽查: 对有效行, 传 mask 与只喂有效行(保持行号对齐的前提下)
+        的检索结果一致。"""
+        self._warm(memory)
+        torch.manual_seed(23)
+        s_t = torch.randn(4, D_FEATURE)
+        mask = torch.tensor([True, False, True, True])
+        r_full, _ = memory(s_t, mask=mask)
+        # 第 1 行(停牌)检索为 0; 其余行非零(正常检索)
+        assert torch.equal(r_full[1], torch.zeros(D_V))
+        for b in (0, 2, 3):
+            assert r_full[b].abs().sum() > 0

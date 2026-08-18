@@ -124,6 +124,7 @@ class KDAMarketMemory(nn.Module):
         s_t: torch.Tensor,
         z_t: Optional[torch.Tensor] = None,
         cdap_gate: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
         reset: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Process one timestep through the KDA market memory.
@@ -136,6 +137,11 @@ class KDAMarketMemory(nn.Module):
             to the forget gate alpha. When provided, the gradient flows
             from the memory update back through the gate to CDAP's
             memory_gate_scale, allowing the joint-space modulation to learn.
+        mask : (B,) or (B, 1) or None — 逐行可交易 mask（A3, 2026-08-18）。
+            mask=0 的行（停牌/涨跌停）**完全跳过**记忆更新
+            （α→1 不衰减、β→0 不写入 ⇒ M 逐位不变），且检索输出置零、
+            不贡献信号。训练与推理两侧同口径传入，保证 KDA 记忆
+            "第 b 行 = 固定资产 b" 的行语义在训练/推理间严格一致。
         reset : bool — reinitialize memory matrix to zeros
         """
         B = s_t.size(0)
@@ -143,6 +149,13 @@ class KDAMarketMemory(nn.Module):
 
         if self.M is None or reset or self.M.size(0) != B:
             self.reset_state(B, device)
+
+        # A3 (2026-08-18): mask 归一化为 (B, 1) float, 全函数复用
+        mk = None
+        if mask is not None:
+            mk = mask.float()
+            if mk.dim() == 1:
+                mk = mk.unsqueeze(-1)   # (B,) → (B, 1)
 
         # === Step 1: Per-channel forget gate (KDA FineGrainedGating) ===
         alpha = self.forget_down(s_t)            # (B, bottleneck)
@@ -172,6 +185,11 @@ class KDAMarketMemory(nn.Module):
 
         # === Step 2: β_t (learnable learning rate) ===
         beta = self.beta_proj(s_t)   # (B, 1), β ∈ (0, 1)
+
+        # A3: mask=0 位置跳过记忆更新 (α→1 不衰减, β→0 不写入)
+        if mk is not None:
+            alpha = alpha * mk + (1.0 - mk)
+            beta = beta * mk
 
         # === Step 3: Q / K / V projections ===
         k = self.k_proj(s_t)
@@ -207,6 +225,10 @@ class KDAMarketMemory(nn.Module):
 
         # RMSNorm on output
         retrieved = self._rms_norm(retrieved)
+
+        # A3: mask=0 位置检索置零，不贡献信号
+        if mk is not None:
+            retrieved = retrieved * mk
 
         return retrieved, self.M.clone()
 

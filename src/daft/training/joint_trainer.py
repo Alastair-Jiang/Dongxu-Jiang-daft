@@ -97,10 +97,14 @@ class JointTrainer:
         self.model.to(self.device)
 
         # --- Data loaders (按日对齐批次, 2026-08-16) ---
+        # A3 (2026-08-18): 每批恰一个时间步(B=N), 展平流不删掩码行——
+        # KDA 记忆第 b 行严格对应资产 b, 与 OOS 推理"记忆行=固定资产列"
+        # 语义一致; 掩码行的跳过语义由模型内 mask 门控完成(memory.py A3)。
         N_stocks = train_panel.N
-        eff_batch = max(N_stocks, (batch_size // N_stocks) * N_stocks)
+        eff_batch = N_stocks
         train_ds = TensorDataset(train_s, train_t, train_m, train_tidx)
         val_ds = TensorDataset(val_s, val_t, val_m, val_tidx)
+        # 注: train/val 面板来自同一 Panel 的时序切片, N 相同。
         train_loader = DataLoader(train_ds, batch_size=eff_batch, shuffle=False)
         val_loader = DataLoader(val_ds, batch_size=eff_batch, shuffle=False)
 
@@ -142,13 +146,15 @@ class JointTrainer:
             # ---- Validate ----
             self.model.eval()
             self.layer_proj.eval()
-            val_loss, val_signals, val_targets, val_tidx_c = self._run_epoch(
+            val_loss, val_signals, val_targets, val_tidx_c, val_mask_c = self._run_epoch(
                 val_loader, None, False, return_predictions=True,
             )
 
             # 逐时步截面 rank IC (2026-08-16 修复: 旧实现为退化指标)
+            # A3 (2026-08-18): 掩码行不再被预删除, IC 必须经 mask 过滤。
             val_ic = rank_ic_by_timestep(
                 val_signals.squeeze(-1), val_targets.squeeze(-1), val_tidx_c,
+                mask=val_mask_c,
             )
             val_ic_summary = ic_summary(val_ic) if val_ic.numel() > 0 else {
                 "ic_mean": 0.0, "ic_std": 0.0, "icir": 0.0,
@@ -208,6 +214,10 @@ class JointTrainer:
     def _build_dataset(self, panel: Panel, norm_stats=None):
         """Build s_t, targets, mask from panel.
 
+        A3 (2026-08-18): 掩码行**不再删除**, 保持 (T-1)*N 完整网格——
+        每批(=N 行)恰为一个时间步的完整截面, 记忆行=资产列;
+        掩码行的跳过语义由模型内 mask 门控完成(memory.py)。
+
         norm_stats : (mean, std) 或 None (A2 修复, 2026-08-18)
             None → 从当前段拟合并记录到 self.norm_stats(训练段用法);
             给定 → 复用该统计量且**不**覆盖 self.norm_stats(val 段用法,
@@ -242,12 +252,8 @@ class JointTrainer:
         m_1d = panel.mask[:-1].reshape(T * N, 1)
         t_idx = torch.arange(T, device=s_2d.device).repeat_interleave(N)
 
-        valid = m_1d.squeeze(-1)
-        if valid.any():
-            s_2d = s_2d[valid]
-            t_1d = t_1d[valid]
-            m_1d = m_1d[valid]
-            t_idx = t_idx[valid]
+        # A3 (2026-08-18): 不再按 mask 删除行(原实现见 git 历史)——
+        # 保持完整网格使 DataLoader 每批恰为一个时间步, 记忆行=资产列。
 
         return s_2d, t_1d, m_1d, t_idx
 
@@ -267,6 +273,7 @@ class JointTrainer:
         all_signals = []
         all_targets = []
         all_tidx = []
+        all_masks = []   # A3: 逐行掩码, 供 val-IC 只统计有效行
 
         self.model.memory.reset_state(1, self.device)
 
@@ -279,13 +286,22 @@ class JointTrainer:
             if self.model.memory.M is None or self.model.memory.M.size(0) != B:
                 self.model.memory.reset_state(B, self.device)
 
+            # A3: 整批皆不可交易(全线停牌, 罕见)时跳过
+            if m_b.sum() == 0:
+                self.model.memory.detach_state()
+                continue
+
+            # A3: 有效行权重(等价于修复前"先删行再统计")
+            mk_1d = m_b.float().reshape(-1)
+            mk_den = mk_1d.sum().clamp(min=1.0)
+
             l0 = self.layer_proj["l0"](s_b)
             l1 = self.layer_proj["l1"](s_b)
             l2 = self.layer_proj["l2"](s_b)
             layer_outputs = [l0, l1, l2]
 
             if training:
-                outputs = self.model(s_b, layer_outputs, mode="train")
+                outputs = self.model(s_b, layer_outputs, mode="train", mask=m_b)
                 signal = outputs["signal"]          # (B, 1)
                 routing_probs = outputs["routing_probs"]
 
@@ -293,18 +309,21 @@ class JointTrainer:
                 mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
 
                 # Expert consistency: lightly regularize each expert
+                # A3: 专家权重只统计有效行(与修复前删行口径一致)
                 expert_reg = 0.0
                 for i, expert in enumerate(self.model.experts):
                     pred_i = expert(s_b)
                     loss_i = expert.compute_loss(pred_i, t_b, m_b)
                     # Weight by routing probability to preserve specialization
-                    w_i = routing_probs[:, i].mean()
+                    w_i = (routing_probs[:, i] * mk_1d).sum() / mk_den
                     expert_reg = expert_reg + w_i * loss_i
 
                 loss = mse + 0.1 * expert_reg
 
-                routing_entropy = -(routing_probs * (routing_probs + 1e-8).log()
-                                    ).sum(dim=-1).mean()
+                # A3: 熵监控只对有效行平均
+                routing_entropy = -(
+                    (routing_probs * (routing_probs + 1e-8).log()).sum(dim=-1) * mk_1d
+                ).sum() / mk_den
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -324,7 +343,7 @@ class JointTrainer:
 
             else:
                 with torch.no_grad():
-                    outputs = self.model(s_b, layer_outputs, mode="val")
+                    outputs = self.model(s_b, layer_outputs, mode="val", mask=m_b)
                     signal = outputs["signal"]
                     mse = ((signal - t_b) ** 2 * m_b.float()).sum() / m_b.float().sum().clamp(min=1)
                     total_loss += mse.item()
@@ -333,6 +352,7 @@ class JointTrainer:
                     all_signals.append(signal.cpu())
                     all_targets.append(t_b.cpu())
                     all_tidx.append(ti_b.cpu())
+                    all_masks.append(m_b.cpu())
 
             self.model.memory.detach_state()
             n_batches += 1
@@ -344,7 +364,8 @@ class JointTrainer:
             signals = torch.cat(all_signals, dim=0) if all_signals else torch.zeros(0, 1)
             targets = torch.cat(all_targets, dim=0) if all_targets else torch.zeros(0, 1)
             t_idx = torch.cat(all_tidx, dim=0) if all_tidx else torch.zeros(0, dtype=torch.long)
-            return avg_loss, signals, targets, t_idx
+            masks = torch.cat(all_masks, dim=0) if all_masks else torch.ones(0, 1, dtype=torch.bool)
+            return avg_loss, signals, targets, t_idx, masks
 
         return avg_loss, avg_entropy
 
