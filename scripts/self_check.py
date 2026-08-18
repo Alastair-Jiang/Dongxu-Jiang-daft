@@ -102,6 +102,8 @@ checks_src = [
     ("通道契约", "base_features.py", r"def ensure_base_panel", True),
     ("标准化 train-only(A2)", "router_trainer.py", r"norm_stats=self\.norm_stats", True),
     ("标准化 train-only(A2)", "joint_trainer.py", r"norm_stats=self\.norm_stats", True),
+    ("专家时序验证切分(A1)", "expert_trainer.py", r"def _temporal_split", True),
+    ("专家时序验证切分(A1)无随机打乱", "expert_trainer.py", r"randperm", False),
 ]
 for name, fname, pattern, expect in checks_src:
     text = src_text.get(fname, "")

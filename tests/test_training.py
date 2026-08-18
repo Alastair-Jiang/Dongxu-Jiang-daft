@@ -52,6 +52,50 @@ class TestStage1ExpertTrainer:
         assert callable(trainer.train_all)
 
 
+# ── Stage1 专家训练时序验证切分 (A1) ─────────────────────────────────────
+
+class TestStage1TemporalSplit:
+    """A1: Stage1 专家训练内部 train/val 切分必须是时间后段验证（无泄漏）。
+
+    ``_train_one_expert`` 通过布尔掩码展平样本（行优先=时间序），再用
+    ``_temporal_split`` 按连续时间切分：val = 最后 ``val_frac`` 比例的样本。
+    """
+
+    def _bare(self, config):
+        """绕开 __init__（特征提取较重），只测切分逻辑依赖的 config。"""
+        tr = Stage1ExpertTrainer.__new__(Stage1ExpertTrainer)
+        tr.config = config
+        return tr
+
+    def test_temporal_split_default_frac(self):
+        assert self._bare({})._temporal_split(1000) == (900, 100)
+
+    def test_temporal_split_custom_frac(self):
+        assert self._bare({"val_frac": 0.2})._temporal_split(100) == (80, 20)
+
+    def test_temporal_split_keeps_one_val(self):
+        assert self._bare({})._temporal_split(5) == (4, 1)
+
+    def test_temporal_split_degenerate(self):
+        tr = self._bare({})
+        assert tr._temporal_split(1) == (1, 0)
+        assert tr._temporal_split(0) == (0, 0)
+
+    def test_temporal_split_zero_frac_disables_val(self):
+        assert self._bare({"val_frac": 0.0})._temporal_split(1000) == (1000, 0)
+
+    def test_flat_mask_index_is_time_ordered(self):
+        """布尔掩码展平保持 (时步-优先) 顺序 —— 连续时间切分的前提。"""
+        experts = nn.ModuleList([TrendExpert(input_dim=200, hidden_dim=64)])
+        panel = make_synthetic_panel()
+        tr = Stage1ExpertTrainer(experts, panel, {}, torch.device("cpu"))
+        mask = torch.ones_like(tr.targets, dtype=torch.bool)
+        s_flat = tr.s_t_aligned[mask]
+        N = tr.targets.shape[1]
+        assert s_flat.shape[0] == mask.sum()
+        assert torch.allclose(s_flat[:N], tr.s_t_aligned[0][mask[0]])
+
+
 # ── RouterTrainer ───────────────────────────────────────────────────────
 
 class TestRouterTrainer:
