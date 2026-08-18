@@ -193,6 +193,34 @@ regression = [f"{s.name}: {p}" for s, t in scripts_text.items()
 check("5.6 A4[单条件回归守卫]", not regression,
       "脚本层无单条件评估模式" if not regression else f"回潮: {regression[:3]}")
 
+# ── 5.7 A5: 特征注册表 —— 命名清单 + 显式零填充 (2026-08-18) ─────────
+# 原实现各组在特征数不足槽位宽度时用 while 循环反复 append 同一表达式,
+# 200 维中 70 维纯复制列 + 8 处跨组/组内同值重复 → 有效维度仅 ~128。
+# 修复: 每个特征具名(feature_names), 填充列显式命名 g{k}_pad_XX 并恒为 0。
+a5_src = src_text.get("regime_features.py", "")
+while_fill = [f"{s.name}" for s, t in src_text.items()
+              if re.search(r"while len\(feats\)", t)]
+check("5.7 A5[while 填充清零]", not while_fill,
+      "特征层无 while 复制填充" if not while_fill else f"回潮: {while_fill}")
+
+registry_bits = ["feature_names", "real_feature_mask", "_pad_and_stack",
+                 "A5_REAL_COUNTS_DAILY"]
+missing_reg = [b for b in registry_bits if b not in a5_src]
+check("5.7 A5[特征注册表]", not missing_reg,
+      "命名清单/掩码/填充工具/计数常量齐备" if not missing_reg
+      else f"缺失: {missing_reg}")
+
+pad_named = re.search(r'_pad_\{i:02d\}', a5_src) is not None
+check("5.7 A5[填充显式命名]", pad_named,
+      "填充槽位命名 g{k}_pad_XX 可审计" if pad_named else "填充命名模式缺失")
+
+dup_fills = [p for p in (r"vol_20 \* ret", r"amihud_20 \* spread",
+                         r"ret_5 \* ret_20", r"feats\[-2\]")
+             if re.search(p, a5_src)]
+check("5.7 A5[重复列表达式清除]", not dup_fills,
+      "历史 while 填充表达式与脆弱索引均已清除" if not dup_fills
+      else f"残留: {dup_fills}")
+
 # ── 6. git 工作树卫生(未提交文件提醒, 不阻塞) ────────────────────────
 r = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
                    capture_output=True, text=True)
