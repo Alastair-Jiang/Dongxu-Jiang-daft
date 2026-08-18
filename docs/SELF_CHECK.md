@@ -11,7 +11,7 @@
 | 2 | outputs/*.json 结构完整性（按产物类型: oos/rebalance/smoothing/walk-forward/weekly） | ✅ 阻塞 |
 | 2b | 训练型产物 seed 字段（可追溯性） | ⚠️ 告警（历史债） |
 | 3 | 登记表表格行内 EXP ID 唯一性 | ⚠️ 告警（跨表重复正常） |
-| 4 | 关键公式实现抽查（10 项 grep 断言，见下表） | ✅ 阻塞 |
+| 4 | 关键公式实现抽查（12 项 grep 断言，见下表） | ✅ 阻塞 |
 | 5 | 路由损失结构（balance KL 存在、无熵抵消回归） | ✅ 阻塞 |
 
 ### 公式抽查清单（第 4 项，与 SELF_CHECK 公式表对应）
@@ -27,6 +27,7 @@
 | 涨跌停 mask | baostock_adapter.py | `_limit_move_mask` |
 | 通道契约 | base_features.py | `ensure_base_panel` |
 | 标准化 train-only(A2) | router/joint_trainer.py | val 段 `norm_stats=self.norm_stats` 复用训练段统计量 |
+| 专家时序验证切分(A1) | expert_trainer.py | `_temporal_split` 存在；`randperm` 不存在 |
 
 ## 二、人工检查（脚本覆盖不到的部分）
 
