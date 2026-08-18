@@ -102,7 +102,8 @@ def main():
             l0 = layer_proj["l0"](s_b)
             l1 = layer_proj["l1"](s_b)
             l2 = layer_proj["l2"](s_b)
-            outputs = model(s_b, [l0, l1, l2], mode="inference")
+            outputs = model(s_b, [l0, l1, l2], mode="inference",
+                            mask=panel.mask[t].to(device))  # A3: 记忆行语义对齐
             final_signal[t] = outputs["signal"].squeeze(-1).cpu()
             model.memory.detach_state()
 

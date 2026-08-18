@@ -118,6 +118,47 @@ has_old_entropy_pair = re.search(r"entropy_weight \* routing_entropy", rt) is no
 check("5. 路由损失结构", has_balance_kl and not has_old_entropy_pair,
       "balance KL 存在" if has_balance_kl else "balance KL 缺失")
 
+# ── 5.5 A3: KDA 记忆行语义 —— 训练/推理一致 (2026-08-18) ────────────────
+# 方向① "按资产对齐记忆行(不删行, mask 进权重)":
+#   - 模型侧: mask=0 行 α→1/β→0(跳过更新) + 检索置零
+#   - 训练侧: 每批恰一个时间步(eff_batch=N), 展平流不删行, mask 透传
+#   - 推理侧: 逐日循环传 mask, 与训练同口径
+a3_checks = [
+    ("记忆 mask 门控", "memory.py", r"alpha = alpha \* mk \+ \(1\.0 - mk\)"),
+    ("记忆检索置零", "memory.py", r"retrieved = retrieved \* mk"),
+    ("Stage2 每批一时步", "router_trainer.py", r"eff_batch = N_stocks"),
+    ("Stage3 每批一时步", "joint_trainer.py", r"eff_batch = N_stocks"),
+    ("Stage2 传 mask", "router_trainer.py", r'mode="train", mask=m_b'),
+    ("Stage3 传 mask", "joint_trainer.py", r'mode="train", mask=m_b'),
+]
+a3_ok = 0
+for name, fname, pattern in a3_checks:
+    text = src_text.get(fname, "")
+    passed = bool(re.search(pattern, text))
+    a3_ok += passed
+    check(f"5.5 A3[{name}]", passed, f"{fname} 中{'存在' if passed else '缺失'}目标实现")
+
+# 展平流不得按 mask 删行(回归守卫)
+no_drop = all(
+    re.search(r"s_2d = s_2d\[valid\]", src_text.get(f, "")) is None
+    for f in ("router_trainer.py", "joint_trainer.py")
+)
+check("5.5 A3[展平流不删行]", no_drop, "两 trainer 均无删行代码" if no_drop else "发现删行回归")
+
+# 推理侧逐日循环必须传 mask(记忆行=资产列, 训练/推理同口径)
+scripts_text = {p.name: p.read_text(encoding="utf-8") for p in (ROOT / "scripts").glob("*.py")}
+a3_scripts = [
+    "run_full_pipeline.py", "run_full_pipeline_oos.py",
+    "run_full_pipeline_oos_weekly.py", "run_full_pipeline_us.py",
+    "run_backtest_only.py", "run_oos_backtest_only.py",
+    "run_walk_forward.py", "run_rebalance_ablation.py",
+    "run_smoothing_ablation.py", "diag_experts.py", "e2_best_expert.py",
+]
+missing = [s for s in a3_scripts
+         if not re.search(r"mask=(panel|weekly)\.mask\[t\]", scripts_text.get(s, ""))]
+check("5.5 A3[推理侧传mask]", not missing,
+      f"{len(a3_scripts)} 个入口全部已传" if not missing else f"缺失: {missing}")
+
 # ── 6. git 工作树卫生(未提交文件提醒, 不阻塞) ────────────────────────
 r = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
                    capture_output=True, text=True)

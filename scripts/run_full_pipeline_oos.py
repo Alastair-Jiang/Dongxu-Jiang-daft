@@ -61,6 +61,9 @@ def generate_oos_signals(model, layer_proj, panel, mu, sd, device):
 
     Memory is warmed up on the panel sequentially (causal: state at t only
     depends on t and earlier), so the test segment starts from a warm state.
+
+    A3 (2026-08-18): 逐行传 mask —— 停牌/涨跌停行跳过记忆更新且检索置零,
+    与 Stage2/3 训练侧的记忆行语义(第 b 行=资产 b)严格一致。
     """
     extractor = RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
     with torch.no_grad():
@@ -82,7 +85,8 @@ def generate_oos_signals(model, layer_proj, panel, mu, sd, device):
             l0 = layer_proj["l0"](s_b)
             l1 = layer_proj["l1"](s_b)
             l2 = layer_proj["l2"](s_b)
-            outputs = model(s_b, [l0, l1, l2], mode="inference")
+            outputs = model(s_b, [l0, l1, l2], mode="inference",
+                          mask=panel.mask[t].to(device))  # A3: 记忆行语义对齐
             signals[t] = outputs["signal"].squeeze(-1).cpu()
             model.memory.detach_state()
     return signals

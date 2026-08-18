@@ -109,7 +109,8 @@ def generate_backtest_signals(
         l2 = layer_proj["l2"](s_b)
 
         with torch.no_grad():
-            outputs = model(s_b, [l0, l1, l2], mode="inference")
+            outputs = model(s_b, [l0, l1, l2], mode="inference",
+                            mask=panel.mask[t].to(device))  # A3: 记忆行语义对齐
             signals[t] = outputs["signal"].squeeze(-1).cpu()
 
         model.memory.detach_state()

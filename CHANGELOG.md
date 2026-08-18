@@ -32,6 +32,36 @@
   既有实验结论（NO-GO 判定）不受影响，但其 Stage2/3 早停路径的
   val-IC 数值口径与修复后不可直接比较。
 
+### A3 — KDA 记忆行语义：按资产对齐（不删行，mask 进门控）（2026-08-18）
+
+- **问题**: KDA 记忆的行语义在训练与推理间不一致。训练时展平流按 mask
+  过滤行，记忆第 b 行对应的 (t, 资产) 随每日停牌/涨跌停数漂移，记忆学到的是
+  "跨资产混合序列"状态；推理时记忆行=固定资产列。"记忆无增益"消融结论的
+  潜在混淆因子（K3 纲领 `docs/K3_GUIDANCE_2026-08-18.md` A3）。
+- **修复（方向① 按资产对齐记忆行）**:
+  - `models/memory.py`: `forward` 新增 `mask` 参数——mask=0 行
+    α→1（不衰减）、β→0（不写入）⇒ M 逐位不变（IEEE 精确），检索输出置零；
+    mask=None 走旧路径（外部调用兼容）。
+  - `training/router_trainer.py` / `joint_trainer.py`: 展平流不再删行
+    （保持 (T-1)·N 网格）；`eff_batch = N`（每批恰一个时间步 ⇒ 记忆行=资产列）；
+    mask 透传给模型；路由统计（routing_mean / 负载均衡 current_frac / 熵监控）
+    改为只对有效行计算——与修复前"先删行再统计"口径严格等价；
+    新增全线停牌日守卫（跳过该批，防负载均衡 KL 发散）。
+  - 推理侧 11 个入口脚本（`run_full_pipeline*.py` / `run_*backtest*.py` /
+    `run_walk_forward.py` / 两个消融 / `diag_experts.py` / `e2_best_expert.py`）
+    逐日循环同口径传 mask——训练/推理记忆语义严格一致。
+- **守卫**: `tests/test_memory.py::TestA3MaskSemantics`（5 项：跳过更新逐位不变/
+  检索置零/形状等价/None 兼容/混合 mask 抽查）+ `tests/test_training.py::`
+  `TestA3MemoryRowSemantics`（6 项：两 trainer 不删行/按日对齐/Stage2+Stage3
+  的"训练 val vs OOS 推理"信号与记忆终态逐位一致）+ `self_check.py` 5.5 节
+  9 项断言（模型门控/两 trainer/不删行回归守卫/推理脚本全传 mask）。
+- **影响面**: 不动模型结构与推理数学（mask=None 时行为不变）；但 Stage2/3 的
+  优化轨迹改变（批大小 N vs 旧多日批）——修复后训练出的 val-IC 数值与历史
+  实验不可直接比较。既有 NO-GO 判定基于 DAFT vs Ridge 整体差距（0.02→0.05），
+  结论不变；"KDA 记忆无增益"归因已加**条件性脚注**
+  （`RESEARCH_FINDINGS_2026-08-17.md` 一节），是否值得预注册内复核待 K3
+  定夺（纲领 §4.3 待决问题 1，成本 ≈2 个训练 run）。
+
 ## v0.1.0 — 工程修复 + 全面升级 (2026-08-16)（旧规则:v0.3.0 代码义）
 
 ### 修复批次(PR #9, 10 提交 squashed)

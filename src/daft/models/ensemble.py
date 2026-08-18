@@ -58,6 +58,7 @@ class ExpertEnsemble(nn.Module):
         layer_outputs: List[torch.Tensor],
         mode: str = "train",
         use_hardening: bool = False,
+        mask: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Full DAFT forward pass.
 
@@ -71,6 +72,10 @@ class ExpertEnsemble(nn.Module):
             "train", "val", or "inference".
         use_hardening : bool
             Enable hardened fast-path lookup.
+        mask : torch.Tensor, shape (B,) or (B, 1), or None (A3, 2026-08-18)
+            逐行可交易 mask。透传给 KDA 记忆: mask=0 的行跳过记忆更新
+            且检索置零，保证记忆行语义(第 b 行=资产 b)在训练/推理间一致。
+            训练(Stage2/3)与推理脚本同口径传入; None 保持旧行为。
 
         Notes
         -----
@@ -190,7 +195,7 @@ class ExpertEnsemble(nn.Module):
             # 消融: 跳过 KDA 记忆, 检索输出置零(记忆路径不参与信号)
             retrieved = torch.zeros(B, self.memory.d_v, device=device)
         else:
-            retrieved, _ = self.memory(s_t, z_t=z_t, cdap_gate=memory_gate)
+            retrieved, _ = self.memory(s_t, z_t=z_t, cdap_gate=memory_gate, mask=mask)
 
         # === Step 5: Weighted expert fusion ===
         # signal = Σ_i w_i · expert_i(s_t)
