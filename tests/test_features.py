@@ -12,7 +12,10 @@ import torch
 
 from daft.data.panel import Panel
 from daft.features.tensor_factors import TensorFactorEngine
-from daft.features.regime_features import RegimeFeatureExtractor
+from daft.features.regime_features import (
+    RegimeFeatureExtractor,
+    A5_REAL_COUNTS_DAILY,
+)
 from daft.features.freq_features import FreqFeatureExtractor
 from daft.features.legacy_factors import (
     LEGACY_FACTOR_REGISTRY, compute_all_factors,
@@ -609,6 +612,112 @@ class TestRegimeFeatureExtractor:
         """Output device should match input device."""
         s_t = extractor.forward(panel)
         assert s_t.device == panel.device
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# A5 (2026-08-18, K3 纲领): 特征注册表 + 显式零填充守卫
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestA5FeatureRegistry:
+    """A5: 200 维特征必须是命名注册表 —— 无 while 复制列, 填充显式标注."""
+
+    @pytest.fixture
+    def extractor(self):
+        return RegimeFeatureExtractor(n_base_factors=50, output_dim=200)
+
+    @pytest.fixture
+    def s_t(self, extractor, panel):
+        return extractor.forward(panel)
+
+    def test_no_while_fill_in_source(self):
+        """源代码不得再出现 while len(feats) 复制填充(回归守卫)."""
+        import inspect
+        src = inspect.getsource(RegimeFeatureExtractor)
+        assert "while len(feats)" not in src, (
+            "A5 回归: while 复制填充重现于 RegimeFeatureExtractor"
+        )
+
+    def test_registry_complete(self, extractor, s_t):
+        """注册表与输出逐列对齐: 200 名 / 掩码形状 / 计数自洽."""
+        assert len(extractor.feature_names) == 200
+        assert extractor.real_feature_mask.shape == (200,)
+        assert extractor.real_feature_mask.dtype == torch.bool
+        assert extractor.n_real_features == int(
+            extractor.real_feature_mask.sum().item())
+        assert extractor.n_real_features + extractor.n_padding == 200
+
+    def test_no_duplicate_names(self, extractor, s_t):
+        """200 个特征名两两不同(组内去重 + 显式 padding 命名)."""
+        names = extractor.feature_names
+        assert len(set(names)) == 200, (
+            f"特征名重复: {len(names) - len(set(names))} 个"
+        )
+
+    def test_daily_real_counts(self, extractor, s_t):
+        """日频各组真实特征数与声明的注册表一致(115 真实 + 85 填充)."""
+        assert extractor.group_real_counts == {
+            "g1": 27, "g2": 20, "g3": 20,
+            "g4": 14, "g5": 15, "g6": 19,
+        }
+        assert extractor.group_real_counts == A5_REAL_COUNTS_DAILY
+        assert extractor.n_real_features == 115
+        assert extractor.n_padding == 85
+
+    def test_padding_columns_are_zero(self, extractor, s_t):
+        """零填充列必须恒为 0(不携带信息, 不放大共线性)."""
+        pad_mask = ~extractor.real_feature_mask
+        assert extractor.n_padding > 0
+        pad_cols = s_t[..., pad_mask]
+        assert torch.equal(pad_cols, torch.zeros_like(pad_cols))
+
+    def test_padding_names_explicit(self, extractor, s_t):
+        """每个填充槽位都显式命名为 g{k}_pad_XX(可审计)."""
+        import re
+        pad_names = [n for n in extractor.feature_names if "_pad_" in n]
+        assert len(pad_names) == extractor.n_padding
+        for n in pad_names:
+            assert re.fullmatch(r"g\d+_pad_\d{2}", n), f"非法填充名: {n}"
+
+    def test_real_columns_carry_information(self):
+        """真实特征列应有非零信息量(长面板, 覆盖最长 120 窗口预热)."""
+        ext = RegimeFeatureExtractor()
+        p = _make_panel(T=200, N=10)
+        s_t = ext.forward(p)
+        real_cols = s_t[..., ext.real_feature_mask]  # (T, N, n_real)
+        col_energy = real_cols.abs().sum(dim=(0, 1))
+        n_nonzero = int((col_energy > 0).sum().item())
+        assert n_nonzero >= int(0.9 * ext.n_real_features), (
+            f"仅 {n_nonzero}/{ext.n_real_features} 个真实特征列非零"
+        )
+
+    def test_registry_idempotent(self, extractor, panel):
+        """两次 forward 注册表一致(配置决定, 无随机性)."""
+        extractor.forward(panel)
+        names_1 = list(extractor.feature_names)
+        mask_1 = extractor.real_feature_mask.clone()
+        extractor.forward(panel)
+        assert extractor.feature_names == names_1
+        assert torch.equal(extractor.real_feature_mask, mask_1)
+
+    def test_weekly_dedup_by_name(self):
+        """周线缩放(0.2)窗口塌缩 → 同名特征按注册表去重, 契约仍 200 维."""
+        ext = RegimeFeatureExtractor(lookback_scale=0.2)
+        p = _make_panel(T=200, N=10)
+        s_t = ext.forward(p)
+        # 契约不变
+        assert s_t.shape == (200, 10, 200)
+        assert len(ext.feature_names) == 200
+        assert len(set(ext.feature_names)) == 200
+        # 去重生效: 各组真实数只减不增, 填充相应增加
+        for g, daily in A5_REAL_COUNTS_DAILY.items():
+            assert ext.group_real_counts.get(g, 0) <= daily, (
+                f"{g} 周线真实数 {ext.group_real_counts.get(g, 0)} "
+                f"超过日频 {daily}(去重失效)"
+            )
+        assert ext.n_real_features + ext.n_padding == 200
+        # 填充列仍恒零
+        pad_cols = s_t[..., ~ext.real_feature_mask]
+        assert torch.equal(pad_cols, torch.zeros_like(pad_cols))
 
 
 # ═══════════════════════════════════════════════════════════════════════
