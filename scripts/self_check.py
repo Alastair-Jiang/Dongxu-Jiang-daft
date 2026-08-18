@@ -221,6 +221,20 @@ check("5.7 A5[重复列表达式清除]", not dup_fills,
       "历史 while 填充表达式与脆弱索引均已清除" if not dup_fills
       else f"残留: {dup_fills}")
 
+# ── 5.8 B1: v0.2.1 偏差审计纲领 (2026-08-19) ─────────────────────────
+# B 类补丁系列(patch(B*))的总纲领: 偏差主表 D1-D8 + 补丁清单 B2+ 必须在库。
+b1_path = ROOT / "docs" / "B_PATCH_GUIDANCE_2026-08-19.md"
+b1_text = b1_path.read_text(encoding="utf-8") if b1_path.exists() else ""
+check("5.8 B1[纲领在库]", b1_path.exists(),
+      "docs/B_PATCH_GUIDANCE_2026-08-19.md 存在" if b1_path.exists()
+      else "B 类纲领缺失 — v0.2.1 偏差审计未归档")
+
+b1_anchors = ["D1", "D8", "patch(B", "B4", "B5", "EXP-20260817-51"]
+b1_missing = [a for a in b1_anchors if a not in b1_text]
+check("5.8 B1[审计表完整]", b1_path.exists() and not b1_missing,
+      "偏差主表/补丁清单/锚点引用齐备" if not b1_missing
+      else f"缺失锚点: {b1_missing}")
+
 # ── 6. git 工作树卫生(未提交文件提醒, 不阻塞) ────────────────────────
 r = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
                    capture_output=True, text=True)
