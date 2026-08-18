@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from daft.data.loaders import DataLoader
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
@@ -142,11 +142,12 @@ def main():
     y_test_np = y_test
 
     # 时间-截面还原:test 段 (T_test, N)
-    # 注意对齐:targets[t] = log_c[t+1] - log_c[t],故 mask 取 mask[1:]
+    # 注意对齐:targets[t] = log_c[t+1] - log_c[t];
+    # A4 (2026-08-18): 入样 mask 取双条件 mask[t]&mask[t+1] (eligible_mask)
     T_test = T_m1 - n_train
     pred_2d = pred_test.reshape(T_test, N)
     y_2d = y_test_np.reshape(T_test, N)
-    mask_2d = panel.mask[1:][n_train:].reshape(T_test, N)
+    mask_2d = eligible_mask(panel.mask)[n_train:].reshape(T_test, N)
 
     # --- 样本外 IC(截面秩相关,逐时步)---
     ic_series = rank_info_coefficient(pred_2d, y_2d, mask_2d, per_timestep=True)

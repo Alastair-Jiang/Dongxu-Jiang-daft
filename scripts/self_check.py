@@ -159,6 +159,40 @@ missing = [s for s in a3_scripts
 check("5.5 A3[推理侧传mask]", not missing,
       f"{len(a3_scripts)} 个入口全部已传" if not missing else f"缺失: {missing}")
 
+# ── 5.6 A4: 对决入样口径 —— 双条件 mask[t]&mask[t+1] (2026-08-18) ─────
+# Ridge 侧入样/评估原用 mask[1:] 单条件(未来端), DAFT 侧评估同样单条件
+# —— 统一走 eligible_mask(唯一口径点), 与回测引擎 ret_mask 三方对齐。
+has_tool = re.search(r"def eligible_mask", src_text.get("metrics.py", "")) is not None
+check("5.6 A4[eligible_mask 工具]", has_tool,
+      "metrics.py 中存在双条件入样工具" if has_tool else "eligible_mask 缺失")
+
+a4_scripts = [
+    # DAFT 评估侧
+    "run_full_pipeline_oos.py", "run_full_pipeline_oos_weekly.py",
+    "run_full_pipeline_us.py", "run_oos_backtest_only.py",
+    "run_walk_forward.py", "run_rebalance_ablation.py",
+    "run_smoothing_ablation.py", "diag_experts.py",
+    # Ridge 对照侧
+    "run_baseline_ridge_real.py", "run_baseline_ridge.py",
+    "run_baseline_ridge_weekly.py", "run_baseline_ridge_us.py",
+    "run_feature_ablation.py",
+]
+a4_missing = [s for s in a4_scripts if "eligible_mask" not in scripts_text.get(s, "")]
+check("5.6 A4[13 脚本双条件]", not a4_missing,
+      f"{len(a4_scripts)} 个对决/评估脚本全部引用" if not a4_missing
+      else f"未引用: {a4_missing}")
+
+# 回归守卫: 脚本层不得再出现单条件评估模式(历史口径回潮)
+single_patterns = [
+    r"mask_test\[1:\]", r"mask_seg\[1:\]",
+    r"mask_aligned = panel\.mask\[1:\]", r"mask_aligned = weekly\.mask\[1:\]",
+    r"mask_2d = panel\.mask\[1:\]", r"mask_ic = panel\.mask\[1:\]",
+]
+regression = [f"{s.name}: {p}" for s, t in scripts_text.items()
+             for p in single_patterns if re.search(p, t)]
+check("5.6 A4[单条件回归守卫]", not regression,
+      "脚本层无单条件评估模式" if not regression else f"回潮: {regression[:3]}")
+
 # ── 6. git 工作树卫生(未提交文件提醒, 不阻塞) ────────────────────────
 r = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
                    capture_output=True, text=True)

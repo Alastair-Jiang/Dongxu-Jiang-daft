@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from daft.features.regime_features import RegimeFeatureExtractor
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -82,7 +82,8 @@ def main():
     log_c = torch.log(close.clamp(min=1e-8))
     targets = (log_c[1:] - log_c[:-1]).clamp(-0.5, 0.5)
     s_aligned = s_t[:-1]
-    mask_aligned = panel.mask[1:]
+    # A4 (2026-08-18): 双条件入样 mask[t]&mask[t+1], 与对决主口径统一
+    mask_aligned = eligible_mask(panel.mask)
     T_m1 = targets.size(0)
     n_train = int(T_m1 * 0.6)
     T_test = T_m1 - n_train

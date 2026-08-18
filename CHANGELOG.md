@@ -62,6 +62,33 @@
   （`RESEARCH_FINDINGS_2026-08-17.md` 一节），是否值得预注册内复核待 K3
   定夺（纲领 §4.3 待决问题 1，成本 ≈2 个训练 run）。
 
+### A4 — 对决入样口径：双条件 mask[t] AND mask[t+1]（2026-08-18）
+
+- **问题**: DAFT 与 Ridge 的样本入样口径不一致。回测引擎内部虽已是
+  双条件（`ret_mask = mask[:-1] & mask[1:]`），但评估层全部单条件：
+  Ridge 侧训练入样 + test IC/hit 用 `mask[1:]`（收益实现日单条件），
+  DAFT 侧 test IC/hit 同样单条件——涨停日（信号日不可交易）但次日
+  复牌的样本收益被计入 IC，高估可交易信号预测力；停牌恢复日两侧
+  处理不对称（K3 纲领 `docs/K3_GUIDANCE_2026-08-18.md` A4），
+  属"公平对决"声明的瑕疵。
+- **修复**: `utils/metrics.py` 新增 `eligible_mask(mask)`——唯一口径点，
+  输出第 t 行 = `mask[t] & mask[t+1]`（信号日可交易且收益实现日可交易），
+  与回测引擎 `ret_mask` 同一公式。13 个对决/评估脚本统一引用：
+  - Ridge 5 个（`run_baseline_ridge{,_real,_us,_weekly}.py` +
+    `run_feature_ablation.py`）: 训练入样、test 入样、IC、hit 全走双条件
+    （`mask_aligned` 形状不变，纯语义收紧，无破坏）；
+  - DAFT 8 个（`run_full_pipeline_oos{,_weekly,_us}.py` +
+    `run_oos_backtest_only.py` + `run_walk_forward.py` + 两消融 +
+    `diag_experts.py`）: test IC/hit 改双条件（回测层本就双条件）。
+- **守卫**: `tests/test_metrics.py::TestA4EligibleMask`（7 项：形状与
+  逐行语义/全 1/全 0/涨停日剔除/停牌恢复日/与引擎公式逐位一致/float
+  兼容）+ `self_check.py` 5.6 节 3 项断言（工具存在/13 脚本引用/
+  单条件模式回归守卫）。
+- **影响面**: 纯评估口径收紧，不动模型/训练/回测数学。IC/hit 数值
+  预期轻微下移（剔除不可交易样本）；既有 NO-GO 判定基于整体差距
+  （IC 0.02→0.05 量级 + Sharpe 差距），双条件两侧同收紧不改变结论
+  ——但按纲领要求，两对决脚本需同口径重跑一次登记（EXP 产物待补）。
+
 ## v0.1.0 — 工程修复 + 全面升级 (2026-08-16)（旧规则:v0.3.0 代码义）
 
 ### 修复批次(PR #9, 10 提交 squashed)

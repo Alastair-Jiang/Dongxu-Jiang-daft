@@ -37,7 +37,7 @@ from daft.training.expert_trainer import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 from daft.utils.device import get_device
 
@@ -230,11 +230,15 @@ def main():
     # IC on test segment (cross-sectional, per-timestep)
     # 对齐(2026-08-16 统一 k→k+1): returns_test[t] = p[t_val_end+t+1]-p[t_val_end+t],
     # signals_test[:-1][t] = signals_full[t_val_end+t] 恰好预测该收益。
+    # A4 (2026-08-18): 双条件入样 mask[t]&mask[t+1] —— 信号日可交易且
+    # 收益实现日可交易; 与 Ridge baseline(run_baseline_ridge_real.py)
+    # 及回测引擎内部 ret_mask 三方同口径, 消除"公平对决"声明瑕疵。
     log_pt = torch.log(prices_test.clamp(min=1e-8))
     returns_test = (log_pt[1:] - log_pt[:-1])             # (T_test-1, N)
-    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, mask_test[1:], per_timestep=True)
+    ic_mask = eligible_mask(mask_test)
+    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, ic_mask, per_timestep=True)
     ic_stats = ic_summary(ic_series)
-    hit = hit_rate(signals_test[:-1], returns_test, mask_test[1:])
+    hit = hit_rate(signals_test[:-1], returns_test, ic_mask)
 
     print(f"\n  ── DAFT · 真实数据 · 样本外结果 ──")
     print(f"    Rank IC     : {ic_stats['ic_mean']:+.4f}")
@@ -258,7 +262,7 @@ def main():
         "arch": args.arch,
         "n_heads": args.n_heads if args.arch == "transformer" else None,
         "stage1_regime": not args.no_regime,
-        "alignment": "k→k+1 (signal[t] 预测 p[t+1]-p[t], 2026-08-16 统一)",
+        "alignment": "k→k+1 + 双条件入样 mask[t]&mask[t+1] (2026-08-18 A4 统一; 与 Ridge 同口径)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,
             "start": args.start, "end": args.end, "frequency": "daily",

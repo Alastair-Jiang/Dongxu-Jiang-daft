@@ -24,7 +24,7 @@ from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.factory import build_model
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 from daft.utils.device import get_device
 
@@ -56,8 +56,9 @@ def evaluate(engine_cfg: dict, smoothed: torch.Tensor, prices_seg: torch.Tensor,
     bt = engine.run(smoothed, prices_seg, mask=mask_seg)
     log_pt = torch.log(prices_seg.clamp(min=1e-8))
     returns = log_pt[1:] - log_pt[:-1]
+    # A4 (2026-08-18): 双条件入样, 与对决主口径统一
     ic = ic_summary(rank_info_coefficient(
-        smoothed[:-1], returns, mask_seg[1:], per_timestep=True))
+        smoothed[:-1], returns, eligible_mask(mask_seg), per_timestep=True))
     return {
         "sharpe": bt["sharpe_ratio"], "annual_return": bt["annual_return"],
         "max_drawdown": bt["max_drawdown"], "turnover": bt["turnover"],
