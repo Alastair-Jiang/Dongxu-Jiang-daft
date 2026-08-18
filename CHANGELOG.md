@@ -2,6 +2,22 @@
 
 ## 未发布 — K3 纲领正确性修复批次（进行中）
 
+### A1 — Stage 1 专家训练 train/val 切分改时间后段验证（2026-08-18）
+
+- **问题**: `Stage1ExpertTrainer._train_one_expert` 用 `torch.randperm` 随机打乱后切分
+  train/val，验证样本与训练样本在时间上随机交错（K3 纲领 `docs/K3_GUIDANCE_2026-08-18.md` A1）。
+  时序自相关下随机切分显著低估泛化误差，早停依据的 val loss 被时间泄漏污染，
+  所有 Stage 1 专家的"最优 epoch"选择偏乐观。
+- **修复**: 新增 `_temporal_split(n_total)` 方法——利用布尔掩码展平的行优先（时间优先）
+  顺序，按连续时间切分：val = 最后 `val_frac` 比例的样本（时间上最晚），train = 其余。
+  小数据退化保护（n≤1 不切，val_frac≤0 禁用验证，val 至少 1 个但保留 ≥1 训练样本）。
+  与主管线严格时序切分保持同一哲学。
+- **守卫**: `tests/test_training.py::TestStage1TemporalSplit`（6 项：
+  默认/自定义比例、小数据保底、退化、零比例禁用、展平时间序前提验证）
+  + `self_check.py` 公式抽查新增 2 项断言（`_temporal_split` 存在；`randperm` 不存在）。
+- **影响面**: 仅训练期 val 口径与早停路径，不动模型结构与 OOS 推理逻辑；
+  既有实验结论（NO-GO 判定）不受影响，但 Stage 1 专家的最优 epoch 选择口径与修复后不可直接比较。
+
 ### A2 — Stage 2/3 标准化统计量 train-only 贯穿（2026-08-18）
 
 - **问题**: `RouterTrainer` / `JointTrainer` 的 `_build_dataset` 对

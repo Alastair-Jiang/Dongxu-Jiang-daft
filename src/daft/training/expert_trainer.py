@@ -49,7 +49,9 @@ class Stage1ExpertTrainer:
         - weight_decay (float, default 1e-5)
         - early_stop_patience (int, default 10)
         - grad_clip_norm (float, default 1.0)
-        - val_frac (float, default 0.1)
+        - val_frac (float, default 0.1) — LAST fraction of the timeline
+          used for validation (temporal hold-out, A1; was a random
+          permutation split, which leaked across time via autocorrelation)
     device : torch.device, optional
     """
 
@@ -259,6 +261,22 @@ class Stage1ExpertTrainer:
     # ------------------------------------------------------------------
     # Single-expert training loop
     # ------------------------------------------------------------------
+    def _temporal_split(self, n_total: int) -> Tuple[int, int]:
+        """Return (n_train, n_val) for a strict temporal hold-out (A1).
+
+        The validation set is the LAST ``val_frac`` fraction of the (flat,
+        chronologically-ordered) sample sequence, matching the main
+        pipeline's temporal split philosophy instead of a random
+        permutation (which interleaves future/present in train/val and
+        leaks time information through autocorrelation).
+        """
+        val_frac = float(self.config.get("val_frac", 0.1))
+        if val_frac <= 0.0 or n_total <= 1:
+            return n_total, 0
+        n_val = max(int(n_total * val_frac), 1)
+        n_val = min(n_val, n_total - 1)      # keep ≥1 train sample
+        return n_total - n_val, n_val
+
     def _train_one_expert(
         self,
         expert: nn.Module,
@@ -279,15 +297,19 @@ class Stage1ExpertTrainer:
         t_flat = self.targets[regime_mask].unsqueeze(-1)       # (K, 1)
         loss_mask = torch.ones_like(t_flat)                     # all valid in regime
 
-        # --- Train / validation split ---
+        # --- Temporal train / validation split (A1) ---
+        # s_flat is extracted via boolean-mask indexing over (T-1, N), which
+        # flattens in row-major (time-major) order. So flat index order ==
+        # chronological order, and a simple contiguous cut gives a strict
+        # temporal hold-out. (A random permutation would interleave val
+        # samples with train samples in time — time leakage — biasing the
+        # early-stop val loss optimistic under autocorrelation.)
         n_total = s_flat.size(0)
-        n_train = int(n_total * (1.0 - self.config.get("val_frac", 0.1)))
-        perm = torch.randperm(n_total)
-        idx_train, idx_val = perm[:n_train], perm[n_train:]
+        n_train, n_val = self._temporal_split(n_total)
 
-        s_train, s_val = s_flat[idx_train], s_flat[idx_val]
-        t_train, t_val = t_flat[idx_train], t_flat[idx_val]
-        m_train, m_val = loss_mask[idx_train], loss_mask[idx_val]
+        s_train, s_val = s_flat[:n_train], s_flat[n_train:]
+        t_train, t_val = t_flat[:n_train], t_flat[n_train:]
+        m_train, m_val = loss_mask[:n_train], loss_mask[n_train:]
 
         train_ds = TensorDataset(s_train, t_train, m_train)
         val_ds   = TensorDataset(s_val,   t_val,   m_val)
