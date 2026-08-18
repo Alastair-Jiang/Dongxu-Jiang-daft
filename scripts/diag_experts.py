@@ -29,7 +29,7 @@ from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.factory import build_experts, build_ensemble, build_layer_proj
 from daft.training.joint_trainer import JointTrainer
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, eligible_mask
 from daft.utils.device import get_device
 
 CKPT_DIR = PROJECT_ROOT / "checkpoints" / "oos"
@@ -112,7 +112,9 @@ def main():
     print("[3/4] causal 遍历 full panel（含 memory warmup）...")
     log_p = torch.log(panel.values[..., 3].clamp(min=1e-8))
     returns = (log_p[1:] - log_p[:-1])            # (T-1, N), returns[t]=p[t+1]-p[t]
-    mask_ic = panel.mask[1:]                      # (T-1, N) 未来端 mask
+    # A4 (2026-08-18): 双条件入样 mask[t]&mask[t+1], 与对决主口径统一
+    # (原"未来端 mask"单条件会把信号日涨停样本的次日收益计入 IC)
+    mask_ic = eligible_mask(panel.mask)           # (T-1, N)
 
     expert_signals = torch.zeros(T - 1, N, n_experts)
     full_probs = torch.zeros(T - 1, N, n_experts)

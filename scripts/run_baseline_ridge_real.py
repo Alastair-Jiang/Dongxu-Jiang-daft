@@ -24,7 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -80,7 +80,10 @@ def main():
     log_c = torch.log(close.clamp(min=1e-8))
     targets = (log_c[1:] - log_c[:-1]).clamp(-0.5, 0.5)
     s_aligned = s_t_raw[:-1]
-    mask_aligned = panel.mask[1:]
+    # A4 (2026-08-18): 双条件入样 mask[t] AND mask[t+1] —— 信号日可交易
+    # (能建仓)且收益实现日可交易(收益真实)。原 mask[1:] 单条件高估
+    # 可交易信号预测力(涨停日次日收益仍被计入), 且与 DAFT 侧口径不对称。
+    mask_aligned = eligible_mask(panel.mask)
 
     # ---------- 3. 严格样本外切分 ----------
     T_m1 = targets.size(0)
@@ -160,7 +163,7 @@ def main():
     # ---------- 8. 保存 ----------
     report = {
         "baseline": "ridge_regression",
-        "alignment": "k→k+1 (2026-08-16 统一; 与 DAFT-OOS 同口径)",
+        "alignment": "k→k+1 + 双条件入样 mask[t]&mask[t+1] (2026-08-18 A4 统一; 与 DAFT-OOS 同口径)",
         "data": {
             "source": "baostock", "stocks": N, "tickers": panel.asset_ids,
             "start": args.start, "end": args.end,

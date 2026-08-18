@@ -9,6 +9,34 @@ from typing import Dict, Optional, Union
 import torch
 
 
+def eligible_mask(mask: torch.Tensor) -> torch.Tensor:
+    """双条件入样 mask (A4, 2026-08-18): mask[t] AND mask[t+1]。
+
+    K3 纲领 A4 统一的对决口径: 信号日 t 可交易(能建仓)且收益实现日
+    t+1 可交易(收益真实)的样本才入样。修复前 DAFT 侧评估用
+    mask[t+1] 单条件、Ridge 侧入样/评估也用 mask[t+1] 单条件——
+    涨停日(t 停)但次日复牌的样本被计入 IC, 高估可交易信号预测力;
+    停牌恢复日两侧处理不对称。
+
+    与 BacktestEngine.run 内部的 ret_mask = mask[:-1] & mask[1:]
+    完全同一公式 —— 评估层与回测层口径对齐。
+
+    Parameters
+    ----------
+    mask : (T, N) bool
+        逐日可交易 mask。
+
+    Returns
+    -------
+    (T-1, N) bool
+        第 t 行 = mask[t] & mask[t+1], 对齐"信号日 t 的信号预测
+        t→t+1 收益"的 (signal, return) 配对序列。
+    """
+    if not mask.dtype == torch.bool:
+        mask = mask.bool()
+    return mask[:-1] & mask[1:]
+
+
 def rank_info_coefficient(
     predictions: torch.Tensor,
     targets: torch.Tensor,

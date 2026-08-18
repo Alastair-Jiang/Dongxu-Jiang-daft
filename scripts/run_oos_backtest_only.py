@@ -15,7 +15,7 @@ from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.factory import build_model as _build_model
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -94,12 +94,13 @@ def main():
                              "top_quantile":0.2,"long_only":False})
     bt = engine.run(signals_test, prices_test, mask=mask_test)
 
-    # IC
+    # IC — A4 (2026-08-18): 双条件入样, 与对决主口径统一
     log_pt = torch.log(prices_test.clamp(min=1e-8))
     returns_test = log_pt[1:] - log_pt[:-1]
-    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, mask_test[1:], per_timestep=True)
+    ic_mask = eligible_mask(mask_test)
+    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, ic_mask, per_timestep=True)
     ic = ic_summary(ic_series)
-    hit = hit_rate(signals_test[:-1], returns_test, mask_test[1:])
+    hit = hit_rate(signals_test[:-1], returns_test, ic_mask)
 
     print(f"\n  ── DAFT · 真实数据 · 样本外(最终) ──")
     print(f"    Rank IC   : {ic['ic_mean']:+.4f}")

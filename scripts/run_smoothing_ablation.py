@@ -26,7 +26,7 @@ from daft.features.regime_features import RegimeFeatureExtractor
 from daft.models.factory import build_model
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -59,7 +59,8 @@ def evaluate(engine_cfg: dict, signals_seg: torch.Tensor, prices_seg: torch.Tens
 
     log_pt = torch.log(prices_seg.clamp(min=1e-8))
     returns = log_pt[1:] - log_pt[:-1]
-    ic_series = rank_info_coefficient(smoothed[:-1], returns, mask_seg[1:],
+    # A4 (2026-08-18): 双条件入样, 与对决主口径统一
+    ic_series = rank_info_coefficient(smoothed[:-1], returns, eligible_mask(mask_seg),
                                       per_timestep=True)
     ic = ic_summary(ic_series)
     return {

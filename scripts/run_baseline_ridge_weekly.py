@@ -28,7 +28,7 @@ from daft.data.adapters.baostock_adapter import BaostockAdapter
 from daft.data.resample import resample_weekly
 from daft.features.regime_features import RegimeFeatureExtractor
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
@@ -97,7 +97,8 @@ def main():
     log_c = torch.log(close_w.clamp(min=1e-8))
     targets = (log_c[1:] - log_c[:-1]).clamp(-0.5, 0.5)  # 周线收益 (T_w-1, N)
     s_aligned = s_t_raw[:-1]
-    mask_aligned = weekly.mask[1:]
+    # A4 (2026-08-18): 双条件入样, 与 DAFT 周线对决同口径
+    mask_aligned = eligible_mask(weekly.mask)
 
     # ---------- 5. 逐段压缩(按时间边界, 不做跨段混排) ----------
     def compress(idx_slice):

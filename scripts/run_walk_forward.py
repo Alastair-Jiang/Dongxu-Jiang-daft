@@ -25,7 +25,7 @@ from daft.training.expert_trainer import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary
+from daft.utils.metrics import rank_info_coefficient, ic_summary, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 from daft.utils.device import get_device
 
@@ -106,8 +106,9 @@ def run_fold(panel, t_train_end, t_test_start, t_test_end, cfg, seed=42):
     bt = engine.run(signals_test, prices_test, mask=mask_test)
     log_pt = torch.log(prices_test.clamp(min=1e-8))
     returns = log_pt[1:] - log_pt[:-1]
+    # A4 (2026-08-18): 双条件入样, 与对决主口径统一
     ic = ic_summary(rank_info_coefficient(
-        signals_test[:-1], returns, mask_test[1:], per_timestep=True))
+        signals_test[:-1], returns, eligible_mask(mask_test), per_timestep=True))
     return {"train_days": t_train_end, "test_days": n_test,
             "ic": ic["ic_mean"], "ic_t": ic["ic_t_stat"],
             "sharpe": bt["sharpe_ratio"], "turnover": bt["turnover"],

@@ -26,7 +26,7 @@ from daft.training.expert_trainer import Stage1ExpertTrainer
 from daft.training.router_trainer import RouterTrainer
 from daft.training.joint_trainer import JointTrainer
 from daft.backtest.engine import BacktestEngine
-from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate
+from daft.utils.metrics import rank_info_coefficient, ic_summary, hit_rate, eligible_mask
 from daft.utils.experiment import config_hash, next_exp_path
 from daft.utils.device import get_device
 
@@ -123,9 +123,11 @@ def main():
     bt = engine.run(signals_test, prices_test, mask=mask_test)
     log_pt = torch.log(prices_test.clamp(min=1e-8))
     returns_test = log_pt[1:] - log_pt[:-1]
-    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, mask_test[1:], per_timestep=True)
+    # A4 (2026-08-18): 双条件入样, 与 Ridge(US) baseline 同口径
+    ic_mask = eligible_mask(mask_test)
+    ic_series = rank_info_coefficient(signals_test[:-1], returns_test, ic_mask, per_timestep=True)
     ic_stats = ic_summary(ic_series)
-    hit = hit_rate(signals_test[:-1], returns_test, mask_test[1:])
+    hit = hit_rate(signals_test[:-1], returns_test, ic_mask)
 
     print(f"\n  ── DAFT 美股 · 样本外 ──")
     print(f"    IC: {ic_stats['ic_mean']:+.4f}  t: {ic_stats['ic_t_stat']:+.2f}  "
